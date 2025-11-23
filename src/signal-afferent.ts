@@ -141,9 +141,13 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
   private handleMessage(data: string): void {
     const { botPhone } = this.context.config;
 
+    console.log(`[SignalAfferent ${botPhone}] Received WebSocket message:`, data.substring(0, 200));
+
     try {
       const message = JSON.parse(data);
       const envelope = message.envelope || {};
+
+      console.log(`[SignalAfferent ${botPhone}] Parsed envelope:`, JSON.stringify(envelope, null, 2).substring(0, 500));
 
       // Extract basic message info
       const source = envelope.source || envelope.sourceNumber || 'unknown';
@@ -156,6 +160,7 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
       // Determine message type and emit appropriate event
       if (dataMessage.message !== undefined || dataMessage.attachments) {
         // Regular message
+        console.log(`[SignalAfferent ${botPhone}] Emitting signal:message event - from: ${source}, message: "${dataMessage.message}"`);
         this.emit({
           topic: 'signal:message',
           source: { elementId: this.element?.id || 'signal-afferent', elementPath: [] },
