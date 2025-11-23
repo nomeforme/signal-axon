@@ -1,0 +1,36 @@
+{
+  "name": "signal-axon",
+  "version": "0.1.0",
+  "description": "Signal messenger AXON module for Connectome - bridges Signal CLI REST API to Connectome events and facets",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "connectome",
+    "axon",
+    "signal",
+    "signal-messenger",
+    "chat",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2",
+    "axios": "^1.6.0",
+    "connectome-ts": "file:../connectome-ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.5.9",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "connectome-ts": "*"
+  }
+}
