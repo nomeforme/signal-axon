@@ -151,6 +151,18 @@ export class SignalMessageReceptor extends BaseReceptor {
           hasContent: true,
           temporal: 'persistent'
         },
+        state: {
+          source: displayName,
+          eventType: 'signal:message',
+          metadata: {
+            source,
+            sourceUuid,
+            conversationKey,
+            isGroupChat,
+            botPhone,
+            timestamp
+          }
+        },
         attributes: {
           source,
           sourceUuid,
