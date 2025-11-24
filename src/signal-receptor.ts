@@ -49,6 +49,9 @@ export class SignalMessageReceptor extends BaseReceptor {
     } = payload;
 
     console.log(`[SignalMessageReceptor] Processing message from ${source}: "${message}" (botPhone: ${botPhone})`);
+    if (mentions && mentions.length > 0) {
+      console.log(`[SignalMessageReceptor] Mentions:`, JSON.stringify(mentions));
+    }
     if (quote) {
       console.log(`[SignalMessageReceptor] Quote detected:`, JSON.stringify(quote));
     }
