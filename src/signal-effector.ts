@@ -22,6 +22,7 @@ export interface SignalEffectorConfig {
 export class SignalSpeechEffector extends BaseEffector {
   private config: SignalEffectorConfig;
   private maxMessageLength: number;
+  private groupIdCache = new Map<string, string>(); // Cache internal_id -> external id mappings
 
   constructor(config: SignalEffectorConfig) {
     super();
@@ -53,6 +54,41 @@ export class SignalSpeechEffector extends BaseEffector {
     }
 
     return { events };
+  }
+
+  /**
+   * Convert internal group ID to external group ID that the API expects
+   * Signal provides internal_id in WebSocket messages, but /v2/send requires the external id
+   */
+  private async convertGroupId(internalId: string, botPhone: string): Promise<string | null> {
+    // Check cache first
+    const cached = this.groupIdCache.get(internalId);
+    if (cached) {
+      return cached;
+    }
+
+    // Fetch groups list from API
+    const url = `${this.config.apiUrl}/v1/groups/${botPhone}`;
+    try {
+      const response = await axios.get(url);
+      const groups = response.data;
+
+      // Find the group with matching internal_id
+      for (const group of groups) {
+        if (group.internal_id === internalId) {
+          // Cache the mapping
+          this.groupIdCache.set(internalId, group.id);
+          console.log(`[SignalSpeechEffector] Converted group ID: ${internalId.substring(0, 20)}... -> ${group.id}`);
+          return group.id;
+        }
+      }
+
+      console.warn(`[SignalSpeechEffector] No external group ID found for internal_id: ${internalId}`);
+      return null;
+    } catch (error) {
+      console.error(`[SignalSpeechEffector] Error fetching groups for ${botPhone}:`, error instanceof Error ? error.message : String(error));
+      return null;
+    }
   }
 
   private async sendSpeech(facet: any, state: ReadonlyVEILState): Promise<void> {
@@ -95,6 +131,18 @@ export class SignalSpeechEffector extends BaseEffector {
       return;
     }
 
+    // For group chats, convert internal group ID to external group ID
+    let recipientId = conversationKey;
+    if (isGroupChat) {
+      const externalGroupId = await this.convertGroupId(conversationKey, botPhone);
+      if (externalGroupId) {
+        recipientId = externalGroupId;
+      } else {
+        console.warn(`[SignalSpeechEffector] Failed to convert group ID, falling back to internal ID: ${conversationKey}`);
+        // Fall back to using internal ID (may fail, but better than not trying)
+      }
+    }
+
     // Split message if too long
     const chunks = this.splitMessage(content);
 
@@ -104,7 +152,7 @@ export class SignalSpeechEffector extends BaseEffector {
 
       const payload: any = {
         number: botPhone,
-        recipients: [conversationKey],
+        recipients: [recipientId],
         message: chunk,
         text_mode: 'styled' // Enable markdown formatting
       };
@@ -117,9 +165,9 @@ export class SignalSpeechEffector extends BaseEffector {
         await axios.post(url, payload);
 
         if (chunks.length > 1) {
-          console.log(`[SignalSpeechEffector] Message chunk ${i + 1}/${chunks.length} sent to ${conversationKey}`);
+          console.log(`[SignalSpeechEffector] Message chunk ${i + 1}/${chunks.length} sent to ${recipientId}`);
         } else {
-          console.log(`[SignalSpeechEffector] Message sent to ${conversationKey}`);
+          console.log(`[SignalSpeechEffector] Message sent to ${recipientId}`);
         }
       } catch (error) {
         console.error(`[SignalSpeechEffector] Failed to send message chunk ${i + 1}:`, error);
