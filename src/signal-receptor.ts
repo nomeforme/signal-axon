@@ -64,6 +64,7 @@ export class SignalMessageReceptor extends BaseReceptor {
     // Determine conversation key
     const conversationKey = groupId || source;
     const isGroupChat = !!groupId;
+    const streamId = `signal-stream-${conversationKey}`;
 
     // Check if message already exists (deduplication)
     const messageId = `signal-msg-${source}-${timestamp}`;
@@ -149,6 +150,7 @@ export class SignalMessageReceptor extends BaseReceptor {
         type: 'event',
         content: message,
         displayName: displayName,
+        streamId,
         aspects: {
           hasContent: true,
           temporal: 'persistent'
@@ -207,7 +209,6 @@ export class SignalMessageReceptor extends BaseReceptor {
     }
 
     // Create stream reference for this conversation if it doesn't exist
-    const streamId = `signal-stream-${conversationKey}`;
     const existingStream = state.facets.get(streamId);
 
     if (!existingStream) {
