@@ -32,14 +32,12 @@ export function createSignalComponents(config: {
   apiUrl: string;
   botUuids: Map<string, string>;
   botNames: Map<string, string>;
-  botPhoneToAgentId: Map<string, string>;
 }) {
   const afferent = new SignalAfferent();
 
   const receptorConfig: SignalReceptorConfig = {
     botUuids: config.botUuids,
-    botNames: config.botNames,
-    botPhoneToAgentId: config.botPhoneToAgentId
+    botNames: config.botNames
   };
 
   const messageReceptor = new SignalMessageReceptor(receptorConfig);
