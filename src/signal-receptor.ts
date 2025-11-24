@@ -115,7 +115,9 @@ export class SignalMessageReceptor extends BaseReceptor {
     // Determine if bot should respond and if message should be stored in context
     let shouldRespond = false;
     let storeInHistory = true;
-    let processedMessage = message;
+    // Strip U+FFFC (Object Replacement Character) used as placeholder for mentions
+    // This character confuses the LLM if left in the message content
+    let processedMessage = message.replace(/\uFFFC/g, '').trim();
 
     if (!isGroupChat) {
       // Always respond in DMs

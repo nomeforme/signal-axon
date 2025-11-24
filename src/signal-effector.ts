@@ -16,6 +16,15 @@ export interface SignalEffectorConfig {
   maxMessageLength?: number;
 }
 
+// Helper to create reverse map (name -> phone)
+function createNameToPhoneMap(botNames: Map<string, string>): Map<string, string> {
+  const nameToPhone = new Map<string, string>();
+  for (const [phone, name] of botNames) {
+    nameToPhone.set(name, phone);
+  }
+  return nameToPhone;
+}
+
 /**
  * SignalSpeechEffector sends speech facets to Signal
  */
@@ -23,11 +32,13 @@ export class SignalSpeechEffector extends BaseEffector {
   private config: SignalEffectorConfig;
   private maxMessageLength: number;
   private groupIdCache = new Map<string, string>(); // Cache internal_id -> external id mappings
+  private nameToPhone: Map<string, string>; // Reverse map: bot name -> phone number
 
   constructor(config: SignalEffectorConfig) {
     super();
     this.config = config;
     this.maxMessageLength = config.maxMessageLength || 400;
+    this.nameToPhone = createNameToPhoneMap(config.botNames);
   }
 
   async process(changes: FacetDelta[], state: ReadonlyVEILState): Promise<EffectorResult> {
@@ -122,9 +133,24 @@ export class SignalSpeechEffector extends BaseEffector {
 
     const conversationKey = streamFacet.attributes?.conversationKey;
     const isGroupChat = streamFacet.attributes?.isGroupChat;
-    const botPhone = streamFacet.attributes?.botPhone;
+    let botPhone = streamFacet.attributes?.botPhone;
 
-    console.log(`[SignalSpeechEffector] Stream ${streamId}: conversationKey=${conversationKey}, isGroupChat=${isGroupChat}, botPhone=${botPhone}`);
+    // For group chats, the stream is shared among all bots, so we need to determine
+    // which bot should send this response based on the agentId
+    if (isGroupChat && facet.agentId) {
+      // agentId is like "agent-haiku-4-5" - extract the bot name
+      const agentIdStr = String(facet.agentId);
+      const botName = agentIdStr.startsWith('agent-') ? agentIdStr.slice(6) : agentIdStr;
+      const phoneFromAgent = this.nameToPhone.get(botName);
+      if (phoneFromAgent) {
+        console.log(`[SignalSpeechEffector] Group chat: using phone ${phoneFromAgent} for agent ${botName}`);
+        botPhone = phoneFromAgent;
+      } else {
+        console.warn(`[SignalSpeechEffector] Could not find phone for agent ${botName}, falling back to stream botPhone`);
+      }
+    }
+
+    console.log(`[SignalSpeechEffector] Stream ${streamId}: conversationKey=${conversationKey}, isGroupChat=${isGroupChat}, botPhone=${botPhone}, agentId=${facet.agentId}`);
 
     if (!conversationKey || !botPhone) {
       console.warn('[SignalSpeechEffector] Missing conversation info in stream:', streamId);
