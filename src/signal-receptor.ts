@@ -48,6 +48,8 @@ export class SignalMessageReceptor extends BaseReceptor {
       timestamp
     } = payload;
 
+    console.log(`[SignalMessageReceptor] Processing message from ${source}: "${message}" (botPhone: ${botPhone})`);
+
     const deltas: VEILDelta[] = [];
 
     // Check if this message is from a bot
@@ -231,6 +233,7 @@ export class SignalMessageReceptor extends BaseReceptor {
 
     // Create agent activation if bot should respond
     if (shouldRespond || !isGroupChat) {
+      console.log(`[SignalMessageReceptor] Creating agent-activation for botPhone ${botPhone}, streamId: ${streamId}, reason: ${botMentioned ? 'mention' : quotedBot ? 'quote' : 'dm'}`);
       deltas.push({
         type: 'addFacet',
         facet: {
@@ -248,6 +251,15 @@ export class SignalMessageReceptor extends BaseReceptor {
           }
         }
       });
+    }
+
+    console.log(`[SignalMessageReceptor] Returning ${deltas.length} deltas`);
+    for (const delta of deltas) {
+      if (delta.type === 'addFacet') {
+        console.log(`  - ${delta.type}: ${delta.facet.type} (id: ${delta.facet.id})`);
+      } else {
+        console.log(`  - ${delta.type}`);
+      }
     }
 
     return deltas;
