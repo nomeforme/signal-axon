@@ -64,7 +64,11 @@ export class SignalMessageReceptor extends BaseReceptor {
     // Determine conversation key
     const conversationKey = groupId || source;
     const isGroupChat = !!groupId;
-    const streamId = `signal-stream-${conversationKey}`;
+    // For DMs, include botPhone in streamId so each bot has its own stream with the user
+    // For groups, just use the groupId since all bots share the same group conversation
+    const streamId = isGroupChat
+      ? `signal-stream-${conversationKey}`
+      : `signal-stream-${botPhone}-${conversationKey}`;
 
     // Check if message already exists (deduplication)
     const messageId = `signal-msg-${source}-${timestamp}`;
