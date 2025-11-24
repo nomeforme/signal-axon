@@ -161,6 +161,12 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
       if (dataMessage.message !== undefined || dataMessage.attachments) {
         // Regular message
         console.log(`[SignalAfferent ${botPhone}] Emitting signal:message event - from: ${source}, message: "${dataMessage.message}"`);
+
+        // Build stream ID for this conversation
+        const conversationKey = dataMessage.groupInfo?.groupId || source;
+        const streamId = `signal-stream-${conversationKey}`;
+        const streamType = 'signal';
+
         this.emit({
           topic: 'signal:message',
           source: { elementId: this.element?.id || 'signal-afferent', elementPath: [] },
@@ -175,7 +181,9 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
             mentions: dataMessage.mentions || [],
             quote: dataMessage.quote,
             timestamp: envelope.timestamp,
-            rawEnvelope: envelope
+            rawEnvelope: envelope,
+            streamId,
+            streamType
           }
         });
       } else if (receiptMessage.when) {
