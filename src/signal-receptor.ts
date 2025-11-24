@@ -13,6 +13,8 @@ export interface SignalReceptorConfig {
   botUuids: Map<string, string>;
   // Map of bot phone numbers to their names
   botNames: Map<string, string>;
+  // Map of bot phone numbers to their agent element IDs (for targeting)
+  botPhoneToAgentId: Map<string, string>;
   // Group chat privacy mode: 'opt-in' (only respond when mentioned) or 'opt-out' (always respond unless opted out)
   groupPrivacyMode?: 'opt-in' | 'opt-out';
   // Random reply chance (0-100): percentage chance to randomly reply in group chats
@@ -233,7 +235,11 @@ export class SignalMessageReceptor extends BaseReceptor {
 
     // Create agent activation if bot should respond
     if (shouldRespond || !isGroupChat) {
-      console.log(`[SignalMessageReceptor] Creating agent-activation for botPhone ${botPhone}, streamId: ${streamId}, reason: ${botMentioned ? 'mention' : quotedBot ? 'quote' : 'dm'}`);
+      // Get target agent ID for this bot
+      const targetAgentId = this.config.botPhoneToAgentId.get(botPhone);
+
+      console.log(`[SignalMessageReceptor] Creating agent-activation for botPhone ${botPhone}, targetAgentId: ${targetAgentId}, streamId: ${streamId}, reason: ${botMentioned ? 'mention' : quotedBot ? 'quote' : 'dm'}`);
+
       deltas.push({
         type: 'addFacet',
         facet: {
@@ -243,6 +249,7 @@ export class SignalMessageReceptor extends BaseReceptor {
             ephemeral: true
           },
           state: {
+            targetAgentId,
             streamId,
             conversationKey,
             triggeredBy: messageId,
