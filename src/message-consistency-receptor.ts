@@ -13,8 +13,8 @@ export interface MessageConsistencyConfig {
   botNames: Map<string, string>;
   // Map of bot phone numbers to their UUIDs
   botUuids: Map<string, string>;
-  // Callback to reconnect a bot's WebSocket
-  reconnectBot: (botPhone: string) => void;
+  // Callback to reconnect a bot's WebSocket and queue a message for re-processing
+  reconnectBot: (botPhone: string, queuedMessage?: any) => void;
 }
 
 interface MessageTracker {
@@ -23,6 +23,7 @@ interface MessageTracker {
   receivedBy: Set<string>;
   mentions: Array<{ uuid?: string; number?: string }>;
   timeout: NodeJS.Timeout;
+  messagePayload: any; // Store the full message payload for re-processing
 }
 
 export class MessageConsistencyReceptor extends BaseReceptor {
@@ -57,6 +58,7 @@ export class MessageConsistencyReceptor extends BaseReceptor {
         timestamp,
         receivedBy: new Set(),
         mentions: mentions || [],
+        messagePayload: payload, // Store full payload for re-processing
         timeout: setTimeout(() => this.checkConsistency(messageId), this.CONSISTENCY_CHECK_DELAY)
       };
       this.messageTrackers.set(messageId, tracker);
@@ -116,12 +118,13 @@ export class MessageConsistencyReceptor extends BaseReceptor {
           console.log(`  ✗ [${phone}] (${botName}) - WILL RECONNECT`);
         }
 
-        // Reconnect mentioned bots
+        // Reconnect mentioned bots and queue the message for re-processing
         console.log(`\nReconnecting ${mentionedMissingBots.size} mentioned bot(s)...`);
         for (const botPhone of mentionedMissingBots) {
           const botName = this.config.botNames.get(botPhone) || 'unknown';
-          console.log(`  → Reconnecting [${botPhone}] (${botName})`);
-          this.config.reconnectBot(botPhone);
+          console.log(`  → Reconnecting [${botPhone}] (${botName}) and queueing message for re-processing`);
+          // Pass the message payload so it can be re-processed after reconnection
+          this.config.reconnectBot(botPhone, tracker.messagePayload);
         }
       }
 
