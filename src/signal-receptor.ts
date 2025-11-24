@@ -95,46 +95,60 @@ export class SignalMessageReceptor extends BaseReceptor {
     const botMentioned = mentions?.some((m: any) => m.uuid === botUuid) || false;
     const quotedBot = quote?.authorUuid === botUuid;
 
-    // Determine if bot should respond based on privacy mode and random chance
+    // Determine if bot should respond and if message should be stored in context
     let shouldRespond = false;
+    let storeInHistory = true;
+    let processedMessage = message;
 
     if (!isGroupChat) {
       // Always respond in DMs
       shouldRespond = true;
+      storeInHistory = true;
     } else {
-      // Group chat logic
+      // Group chat logic - privacy mode controls what gets stored in history
       const groupPrivacyMode = this.config.groupPrivacyMode || 'opt-in';
       const randomReplyChance = this.config.randomReplyChance || 0;
 
-      if (botMentioned || quotedBot) {
-        // Always respond when explicitly mentioned or quoted
-        shouldRespond = true;
-      } else if (groupPrivacyMode === 'opt-out') {
-        // In opt-out mode, respond by default unless user has opted out
-        // Check for opt-out status in VEIL state
-        const userPrefs = Array.from(state.facets.values())
-          .find(f => f.type === 'user-preferences' &&
-                     f.attributes?.userId === source &&
-                     f.attributes?.conversationKey === conversationKey &&
-                     f.attributes?.botPhone === botPhone);
+      // In ALL modes, bots only respond when mentioned or quoted
+      // (random replies can override this below)
+      shouldRespond = botMentioned || quotedBot;
 
-        const hasOptedOut = userPrefs?.attributes?.optedOut === true;
-        shouldRespond = !hasOptedOut;
-      } else if (randomReplyChance > 0) {
-        // Random reply chance (0-100)
-        const roll = Math.random() * 100;
-        shouldRespond = roll < randomReplyChance;
+      // Privacy mode controls what gets stored in conversation history:
+      if (groupPrivacyMode === 'opt-in') {
+        // Opt-in: Only store messages with "." prefix OR when bot is mentioned
+        const hasDotPrefix = message.startsWith('.');
+        storeInHistory = hasDotPrefix || botMentioned || quotedBot;
+
+        // Remove "." prefix if present
+        if (hasDotPrefix) {
+          processedMessage = message.substring(1).trim();
+        }
+      } else {
+        // Opt-out: Store ALL messages UNLESS prefixed with "."
+        if (message.startsWith('.')) {
+          // User explicitly opted out of this message - don't store or respond
+          return [];
+        }
+        storeInHistory = true;
+      }
+
+      // Random reply feature: Give bot a chance to respond even when not mentioned
+      // randomReplyChance is 1-100 where:
+      // - 1 = 100% chance (always reply)
+      // - 100 = 1% chance (1/100)
+      // - 10 = 10% chance (1/10)
+      if (!shouldRespond && randomReplyChance > 0 && storeInHistory) {
+        const roll = Math.floor(Math.random() * 100) + 1;
+        shouldRespond = roll <= (100 / randomReplyChance);
       }
 
       // Check max bot mentions per conversation
-      // If maxBotMentionsPerConversation is set, count bot responses in this conversation
-      // and require explicit mention after threshold is reached
+      // After threshold is reached, require explicit mention or quote
       if (shouldRespond && this.config.maxBotMentionsPerConversation) {
         const botResponseCount = Array.from(state.facets.values())
           .filter(f => f.type === 'speech' &&
-                       f.aspects?.agentGenerated &&
-                       f.attributes?.streamId === `signal-stream-${conversationKey}` &&
-                       f.attributes?.botPhone === botPhone)
+                       f.agentId &&
+                       f.streamId === streamId)
           .length;
 
         if (botResponseCount >= this.config.maxBotMentionsPerConversation) {
@@ -146,11 +160,16 @@ export class SignalMessageReceptor extends BaseReceptor {
       }
     }
 
+    // If message shouldn't be stored in history, don't create facets for it
+    if (!storeInHistory) {
+      return [];
+    }
+
     // Create speech facet as nested child (matching Discord pattern)
     const speechFacet: any = {
       id: `speech-${messageId}`,
       type: 'speech',
-      content: message,
+      content: processedMessage,
       streamId,
       state: {
         speakerId: `signal:${sourceUuid || source}`,
