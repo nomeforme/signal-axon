@@ -242,6 +242,13 @@ export class SignalMessageReceptor extends BaseReceptor {
           aspects: {
             ephemeral: true
           },
+          state: {
+            streamId,
+            conversationKey,
+            triggeredBy: messageId,
+            botPhone,
+            reason: botMentioned ? 'mention' : quotedBot ? 'quote' : 'dm'
+          },
           attributes: {
             streamId,
             conversationKey,
