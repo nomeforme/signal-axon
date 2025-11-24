@@ -78,11 +78,10 @@ export class SignalMessageReceptor extends BaseReceptor {
       : `signal-stream-${botPhone}-${conversationKey}`;
 
     // Check if message already exists (deduplication)
+    // Note: We still need to check if THIS bot should respond, even if message facet exists
     const messageId = `signal-msg-${source}-${timestamp}`;
     const existingMessage = state.facets.get(messageId);
-    if (existingMessage) {
-      return []; // Already processed
-    }
+    const messageAlreadyExists = !!existingMessage;
 
     // Extract display name from existing state or use phone/uuid
     let displayName = source;
@@ -178,111 +177,110 @@ export class SignalMessageReceptor extends BaseReceptor {
       }
     }
 
-    // If message shouldn't be stored in history, don't create facets for it
-    if (!storeInHistory) {
-      return [];
-    }
-
-    // Create speech facet as nested child (matching Discord pattern)
-    const speechFacet: any = {
-      id: `speech-${messageId}`,
-      type: 'speech',
-      content: processedMessage,
-      streamId,
-      state: {
-        speakerId: `signal:${sourceUuid || source}`,
-        speaker: displayName
-      }
-    };
-
-    // Create message event facet (container for metadata)
-    deltas.push({
-      type: 'addFacet',
-      facet: {
-        id: messageId,
-        type: 'event',
-        // No content - content is in the nested speech facet
-        displayName: displayName,
+    // Only create message facets if message doesn't already exist (deduplication)
+    // But we still need to create agent-activation if THIS bot was mentioned
+    if (!messageAlreadyExists && storeInHistory) {
+      // Create speech facet as nested child (matching Discord pattern)
+      const speechFacet: any = {
+        id: `speech-${messageId}`,
+        type: 'speech',
+        content: processedMessage,
         streamId,
-        aspects: {
-          temporal: 'persistent'
-        },
         state: {
-          source: displayName,
-          eventType: 'signal:message',
-          metadata: {
+          speakerId: `signal:${sourceUuid || source}`,
+          speaker: displayName
+        }
+      };
+
+      // Create message event facet (container for metadata)
+      deltas.push({
+        type: 'addFacet',
+        facet: {
+          id: messageId,
+          type: 'event',
+          // No content - content is in the nested speech facet
+          displayName: displayName,
+          streamId,
+          aspects: {
+            temporal: 'persistent'
+          },
+          state: {
+            source: displayName,
+            eventType: 'signal:message',
+            metadata: {
+              source,
+              sourceUuid,
+              conversationKey,
+              isGroupChat,
+              botPhone,
+              timestamp
+            }
+          },
+          attributes: {
             source,
             sourceUuid,
             conversationKey,
             isGroupChat,
             botPhone,
-            timestamp
+            timestamp,
+            mentions,
+            quote,
+            attachments: attachments?.map((a: any) => ({
+              contentType: a.contentType,
+              filename: a.filename,
+              id: a.id
+            }))
+          },
+          children: [speechFacet] // Speech nested inside message
+        }
+      });
+
+      // Create user-profile facet if this is the first time we've seen this user
+      if (!profileFacet && source !== botPhone) {
+        const profileId = `signal-profile-${sourceUuid || source}`;
+        deltas.push({
+          type: 'addFacet',
+          facet: {
+            id: profileId,
+            type: 'user-profile',
+            content: displayName,
+            aspects: {
+              hasState: true,
+              temporal: 'persistent'
+            },
+            attributes: {
+              phoneNumber: source,
+              uuid: sourceUuid,
+              displayName: displayName,
+              platform: 'signal'
+            }
           }
-        },
-        attributes: {
-          source,
-          sourceUuid,
-          conversationKey,
-          isGroupChat,
-          botPhone,
-          timestamp,
-          mentions,
-          quote,
-          attachments: attachments?.map((a: any) => ({
-            contentType: a.contentType,
-            filename: a.filename,
-            id: a.id
-          }))
-        },
-        children: [speechFacet] // Speech nested inside message
+        });
       }
-    });
 
-    // Create user-profile facet if this is the first time we've seen this user
-    if (!profileFacet && source !== botPhone) {
-      const profileId = `signal-profile-${sourceUuid || source}`;
-      deltas.push({
-        type: 'addFacet',
-        facet: {
-          id: profileId,
-          type: 'user-profile',
-          content: displayName,
-          aspects: {
-            hasState: true,
-            temporal: 'persistent'
-          },
-          attributes: {
-            phoneNumber: source,
-            uuid: sourceUuid,
-            displayName: displayName,
-            platform: 'signal'
+      // Create stream reference for this conversation if it doesn't exist
+      const existingStream = state.facets.get(streamId);
+
+      if (!existingStream) {
+        deltas.push({
+          type: 'addFacet',
+          facet: {
+            id: streamId,
+            type: 'stream-definition',
+            content: isGroupChat ? `Group ${groupId?.substring(0, 20)}...` : `DM with ${displayName}`,
+            aspects: {
+              hasState: true,
+              temporal: 'persistent'
+            },
+            attributes: {
+              streamType: 'signal',
+              conversationKey,
+              isGroupChat,
+              botPhone
+            }
           }
-        }
-      });
-    }
-
-    // Create stream reference for this conversation if it doesn't exist
-    const existingStream = state.facets.get(streamId);
-
-    if (!existingStream) {
-      deltas.push({
-        type: 'addFacet',
-        facet: {
-          id: streamId,
-          type: 'stream-definition',
-          content: isGroupChat ? `Group ${groupId?.substring(0, 20)}...` : `DM with ${displayName}`,
-          aspects: {
-            hasState: true,
-            temporal: 'persistent'
-          },
-          attributes: {
-            streamType: 'signal',
-            conversationKey,
-            isGroupChat,
-            botPhone
-          }
-        }
-      });
+        });
+      }
     }
 
     // Create agent activation if bot should respond
