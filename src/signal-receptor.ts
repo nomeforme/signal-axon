@@ -248,6 +248,11 @@ export class SignalMessageReceptor extends BaseReceptor {
           },
           state: {
             targetAgent: botName,
+            streamRef: {
+              streamId,
+              elementId: 'space',
+              elementPath: []
+            },
             streamId,
             conversationKey,
             triggeredBy: messageId,
