@@ -142,17 +142,28 @@ export class SignalMessageReceptor extends BaseReceptor {
       }
     }
 
-    // Create message event facet
+    // Create speech facet as nested child (matching Discord pattern)
+    const speechFacet: any = {
+      id: `speech-${messageId}`,
+      type: 'speech',
+      content: message,
+      streamId,
+      state: {
+        speakerId: `signal:${sourceUuid || source}`,
+        speaker: displayName
+      }
+    };
+
+    // Create message event facet (container for metadata)
     deltas.push({
       type: 'addFacet',
       facet: {
         id: messageId,
         type: 'event',
-        content: message,
+        // No content - content is in the nested speech facet
         displayName: displayName,
         streamId,
         aspects: {
-          hasContent: true,
           temporal: 'persistent'
         },
         state: {
@@ -181,7 +192,8 @@ export class SignalMessageReceptor extends BaseReceptor {
             filename: a.filename,
             id: a.id
           }))
-        }
+        },
+        children: [speechFacet] // Speech nested inside message
       }
     });
 
