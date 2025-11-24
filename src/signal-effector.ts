@@ -67,6 +67,10 @@ export class SignalSpeechEffector extends BaseEffector {
     // The HUD may prepend speaker names to content for rendering
     content = content.replace(/^[^:]+:\s*/, '').trim();
 
+    // Strip Object Replacement Character (U+FFFC) used for mentions
+    // We're not handling mentions in responses yet, so remove these placeholder characters
+    content = content.replace(/\uFFFC/g, '').trim();
+
     // Get stream context (check both root level and attributes)
     const streamId = facet.streamId || facet.attributes?.streamId;
     if (!streamId) {
