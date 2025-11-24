@@ -7,6 +7,7 @@
 import { SignalAfferent, SignalAfferentConfig } from './signal-afferent';
 import { SignalMessageReceptor, SignalReceiptReceptor, SignalTypingReceptor, SignalReceptorConfig } from './signal-receptor';
 import { SignalSpeechEffector, SignalEffectorConfig } from './signal-effector';
+import { MessageConsistencyReceptor, MessageConsistencyConfig } from './message-consistency-receptor';
 
 // Re-export types and classes
 export {
@@ -17,7 +18,9 @@ export {
   SignalTypingReceptor,
   SignalReceptorConfig,
   SignalSpeechEffector,
-  SignalEffectorConfig
+  SignalEffectorConfig,
+  MessageConsistencyReceptor,
+  MessageConsistencyConfig
 };
 
 /**
