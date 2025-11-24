@@ -168,7 +168,10 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
         }
 
         // Build stream ID for this conversation
-        const conversationKey = dataMessage.groupInfo?.groupId || source;
+        // Check both groupInfo and groupV2 (Signal uses different fields for different group versions)
+        const groupInfo = dataMessage.groupInfo || dataMessage.groupV2;
+        const groupId = groupInfo?.groupId;
+        const conversationKey = groupId || source;
         const streamId = `signal-stream-${conversationKey}`;
         const streamType = 'signal';
 
@@ -180,7 +183,7 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
             botPhone,
             source,
             sourceUuid,
-            groupId: dataMessage.groupInfo?.groupId,
+            groupId,
             message: dataMessage.message || '',
             attachments: dataMessage.attachments || [],
             mentions: dataMessage.mentions || [],
