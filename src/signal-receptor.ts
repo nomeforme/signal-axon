@@ -93,9 +93,11 @@ export class SignalMessageReceptor extends BaseReceptor {
       displayName = profileFacet.content;
     }
 
-    // Check if bot was mentioned
+    // Check if bot was mentioned (check both UUID and phone number)
     const botUuid = this.config.botUuids.get(botPhone);
-    const botMentioned = mentions?.some((m: any) => m.uuid === botUuid) || false;
+    const botMentioned = mentions?.some((m: any) =>
+      (botUuid && m.uuid === botUuid) || m.number === botPhone
+    ) || false;
     // Check if message quotes/replies to the bot (need to check both UUID and phone number)
     const quotedBot = quote && (
       (botUuid && quote.authorUuid === botUuid) ||
