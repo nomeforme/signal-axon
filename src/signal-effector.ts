@@ -63,6 +63,10 @@ export class SignalSpeechEffector extends BaseEffector {
     // Remove all XML-like tags (<my_turn>, <event>, etc.)
     content = content.replace(/<[^>]+>/g, '').trim();
 
+    // Strip speaker prefix (e.g., "Claude: " or "+12186633092: ")
+    // The HUD may prepend speaker names to content for rendering
+    content = content.replace(/^[^:]+:\s*/, '').trim();
+
     // Get stream context (check both root level and attributes)
     const streamId = facet.streamId || facet.attributes?.streamId;
     if (!streamId) {
