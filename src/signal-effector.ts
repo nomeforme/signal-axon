@@ -59,8 +59,8 @@ export class SignalSpeechEffector extends BaseEffector {
     const content = facet.content;
     if (!content) return;
 
-    // Get stream context
-    const streamId = facet.attributes?.streamId;
+    // Get stream context (check both root level and attributes)
+    const streamId = facet.streamId || facet.attributes?.streamId;
     if (!streamId) {
       console.warn('[SignalSpeechEffector] Speech facet has no streamId:', facet.id);
       return;
