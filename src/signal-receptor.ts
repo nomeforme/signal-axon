@@ -49,6 +49,9 @@ export class SignalMessageReceptor extends BaseReceptor {
     } = payload;
 
     console.log(`[SignalMessageReceptor] Processing message from ${source}: "${message}" (botPhone: ${botPhone})`);
+    if (quote) {
+      console.log(`[SignalMessageReceptor] Quote detected:`, JSON.stringify(quote));
+    }
 
     const deltas: VEILDelta[] = [];
 
@@ -93,7 +96,11 @@ export class SignalMessageReceptor extends BaseReceptor {
     // Check if bot was mentioned
     const botUuid = this.config.botUuids.get(botPhone);
     const botMentioned = mentions?.some((m: any) => m.uuid === botUuid) || false;
-    const quotedBot = quote?.authorUuid === botUuid;
+    // Check if message quotes/replies to the bot (need to check both UUID and phone number)
+    const quotedBot = quote && (
+      (botUuid && quote.authorUuid === botUuid) ||
+      quote.author === botPhone
+    );
 
     // Determine if bot should respond and if message should be stored in context
     let shouldRespond = false;
