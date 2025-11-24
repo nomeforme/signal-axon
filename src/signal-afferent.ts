@@ -162,6 +162,11 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
         // Regular message
         console.log(`[SignalAfferent ${botPhone}] Emitting signal:message event - from: ${source}, message: "${dataMessage.message}"`);
 
+        // Debug: Log mentions if present
+        if (dataMessage.mentions && dataMessage.mentions.length > 0) {
+          console.log(`[SignalAfferent ${botPhone}] dataMessage.mentions:`, JSON.stringify(dataMessage.mentions));
+        }
+
         // Build stream ID for this conversation
         const conversationKey = dataMessage.groupInfo?.groupId || source;
         const streamId = `signal-stream-${conversationKey}`;
