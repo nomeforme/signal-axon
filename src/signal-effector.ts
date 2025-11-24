@@ -88,6 +88,8 @@ export class SignalSpeechEffector extends BaseEffector {
     const isGroupChat = streamFacet.attributes?.isGroupChat;
     const botPhone = streamFacet.attributes?.botPhone;
 
+    console.log(`[SignalSpeechEffector] Stream ${streamId}: conversationKey=${conversationKey}, isGroupChat=${isGroupChat}, botPhone=${botPhone}`);
+
     if (!conversationKey || !botPhone) {
       console.warn('[SignalSpeechEffector] Missing conversation info in stream:', streamId);
       return;
