@@ -59,8 +59,9 @@ export class SignalSpeechEffector extends BaseEffector {
     let content = facet.content;
     if (!content) return;
 
-    // Strip <my_turn> tags if present (these are for HUD rendering, not for sending)
-    content = content.replace(/<\/?my_turn>/g, '').trim();
+    // Strip HUD rendering tags (these are for display only, not for sending)
+    // Remove all XML-like tags (<my_turn>, <event>, etc.)
+    content = content.replace(/<[^>]+>/g, '').trim();
 
     // Get stream context (check both root level and attributes)
     const streamId = facet.streamId || facet.attributes?.streamId;
