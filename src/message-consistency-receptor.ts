@@ -22,6 +22,7 @@ interface MessageTracker {
   timestamp: number;
   receivedBy: Set<string>;
   mentions: Array<{ uuid?: string; number?: string }>;
+  quote?: { authorUuid?: string; author?: string }; // Quote info if message is a reply
   timeout: NodeJS.Timeout;
   messagePayload: any; // Store the full message payload for re-processing
 }
@@ -40,7 +41,7 @@ export class MessageConsistencyReceptor extends BaseReceptor {
 
   transform(event: SpaceEvent, state: ReadonlyVEILState): VEILDelta[] {
     const payload = event.payload as any;
-    const { source, timestamp, botPhone, mentions, groupId } = payload;
+    const { source, timestamp, botPhone, mentions, quote, groupId } = payload;
 
     // Only check consistency for group messages
     if (!groupId) {
@@ -58,6 +59,7 @@ export class MessageConsistencyReceptor extends BaseReceptor {
         timestamp,
         receivedBy: new Set(),
         mentions: mentions || [],
+        quote: quote, // Track quote/reply info
         messagePayload: payload, // Store full payload for re-processing
         timeout: setTimeout(() => this.checkConsistency(messageId), this.CONSISTENCY_CHECK_DELAY)
       };
@@ -85,8 +87,10 @@ export class MessageConsistencyReceptor extends BaseReceptor {
       }
     }
 
-    // Check if any mentioned bots missed the message
-    const mentionedMissingBots = new Set<string>();
+    // Check if any mentioned or quoted bots missed the message
+    const targetedMissingBots = new Set<string>();
+
+    // Check mentions
     for (const mention of tracker.mentions) {
       const mentionUuid = mention.uuid;
       const mentionNumber = mention.number;
@@ -96,7 +100,24 @@ export class MessageConsistencyReceptor extends BaseReceptor {
         if ((mentionUuid && mentionUuid === botUuid) ||
             (mentionNumber && mentionNumber === botPhone)) {
           if (missingBots.has(botPhone)) {
-            mentionedMissingBots.add(botPhone);
+            targetedMissingBots.add(botPhone);
+          }
+          break;
+        }
+      }
+    }
+
+    // Check quote/reply - if message quotes a bot, that bot should receive it
+    if (tracker.quote) {
+      const quoteAuthorUuid = tracker.quote.authorUuid;
+      const quoteAuthor = tracker.quote.author;
+
+      for (const [botPhone, botUuid] of this.config.botUuids.entries()) {
+        if ((quoteAuthorUuid && quoteAuthorUuid === botUuid) ||
+            (quoteAuthor && quoteAuthor === botPhone)) {
+          if (missingBots.has(botPhone)) {
+            console.log(`[MessageConsistencyReceptor] Quoted bot ${botPhone} (uuid: ${botUuid}) missed the message`);
+            targetedMissingBots.add(botPhone);
           }
           break;
         }
@@ -110,17 +131,20 @@ export class MessageConsistencyReceptor extends BaseReceptor {
       console.log('============================================================');
       console.log(`Message ID: ${messageId}`);
       console.log(`Received by: ${receivedBy.size}/${totalBots} bots`);
+      if (tracker.quote) {
+        console.log(`Quote/Reply to: ${tracker.quote.authorUuid || tracker.quote.author}`);
+      }
 
-      if (mentionedMissingBots.size > 0) {
-        console.log('\n⚠ MENTIONED bots that MISSED the message:');
-        for (const phone of mentionedMissingBots) {
+      if (targetedMissingBots.size > 0) {
+        console.log('\n⚠ TARGETED bots (mentioned/quoted) that MISSED the message:');
+        for (const phone of targetedMissingBots) {
           const botName = this.config.botNames.get(phone) || 'unknown';
           console.log(`  ✗ [${phone}] (${botName}) - WILL RECONNECT`);
         }
 
-        // Reconnect mentioned bots and queue the message for re-processing
-        console.log(`\nReconnecting ${mentionedMissingBots.size} mentioned bot(s)...`);
-        for (const botPhone of mentionedMissingBots) {
+        // Reconnect targeted bots and queue the message for re-processing
+        console.log(`\nReconnecting ${targetedMissingBots.size} targeted bot(s)...`);
+        for (const botPhone of targetedMissingBots) {
           const botName = this.config.botNames.get(botPhone) || 'unknown';
           console.log(`  → Reconnecting [${botPhone}] (${botName}) and queueing message for re-processing`);
           // Pass the message payload so it can be re-processed after reconnection
@@ -128,17 +152,17 @@ export class MessageConsistencyReceptor extends BaseReceptor {
         }
       }
 
-      const otherMissing = new Set([...missingBots].filter(p => !mentionedMissingBots.has(p)));
+      const otherMissing = new Set([...missingBots].filter(p => !targetedMissingBots.has(p)));
       if (otherMissing.size > 0) {
-        console.log('\nOther bots that missed (not mentioned, ignoring):');
+        console.log('\nOther bots that missed (not mentioned/quoted, ignoring):');
         for (const phone of otherMissing) {
           const botName = this.config.botNames.get(phone) || 'unknown';
           console.log(`  • [${phone}] (${botName})`);
         }
       }
 
-      if (mentionedMissingBots.size === 0) {
-        console.log('\nℹ No mentioned bots missed the message, no reconnection needed');
+      if (targetedMissingBots.size === 0) {
+        console.log('\nℹ No targeted bots missed the message, no reconnection needed');
       }
 
       console.log('============================================================\n');

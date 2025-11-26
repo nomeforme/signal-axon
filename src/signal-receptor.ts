@@ -111,6 +111,9 @@ export class SignalMessageReceptor extends BaseReceptor {
       (botUuid && quote.authorUuid === botUuid) ||
       quote.author === botPhone
     );
+    if (quote) {
+      console.log(`[SignalMessageReceptor] Quote check: authorUuid=${quote.authorUuid}, author=${quote.author}, botUuid=${botUuid}, botPhone=${botPhone}, quotedBot=${quotedBot}`);
+    }
 
     // Determine if bot should respond and if message should be stored in context
     let shouldRespond = false;
