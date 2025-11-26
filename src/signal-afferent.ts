@@ -243,7 +243,13 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
         const groupInfo = dataMessage.groupInfo || dataMessage.groupV2;
         const groupId = groupInfo?.groupId;
         const conversationKey = groupId || source;
-        const streamId = `signal-stream-${conversationKey}`;
+        const isGroupChat = !!groupId;
+        // For DMs, include botPhone in streamId so each bot has its own stream with the user
+        // For groups, just use the groupId since all bots share the same group conversation
+        // This MUST match the receptor's streamId generation!
+        const streamId = isGroupChat
+          ? `signal-stream-${conversationKey}`
+          : `signal-stream-${botPhone}-${conversationKey}`;
         const streamType = 'signal';
 
         this.emit({
