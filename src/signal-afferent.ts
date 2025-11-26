@@ -12,6 +12,7 @@ import type { AfferentContext } from 'connectome-ts';
 export interface SignalAfferentConfig {
   botPhone: string;
   wsUrl: string;
+  httpUrl?: string; // HTTP base URL for downloading attachments
   maxReconnectTime?: number; // milliseconds, default 5 minutes
 }
 
@@ -76,8 +77,8 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
       this.state.firstReconnectAttempt = undefined;
     });
 
-    ws.on('message', (data: WebSocket.Data) => {
-      this.handleMessage(data.toString());
+    ws.on('message', async (data: WebSocket.Data) => {
+      await this.handleMessage(data.toString());
     });
 
     ws.on('error', (error: Error) => {
@@ -138,7 +139,38 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
     }, backoffDelay);
   }
 
-  private handleMessage(data: string): void {
+  /**
+   * Download an attachment from Signal API and return as base64
+   */
+  private async downloadAttachment(attachmentId: string): Promise<string | null> {
+    const { botPhone, httpUrl } = this.context.config;
+
+    if (!httpUrl) {
+      console.warn(`[SignalAfferent ${botPhone}] No httpUrl configured, cannot download attachment`);
+      return null;
+    }
+
+    try {
+      const url = `${httpUrl}/v1/attachments/${attachmentId}`;
+      console.log(`[SignalAfferent ${botPhone}] Downloading attachment from ${url}`);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`[SignalAfferent ${botPhone}] Failed to download attachment: ${response.status}`);
+        return null;
+      }
+
+      const buffer = await response.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString('base64');
+      console.log(`[SignalAfferent ${botPhone}] Downloaded attachment: ${base64.length} bytes (base64)`);
+      return base64;
+    } catch (error) {
+      console.error(`[SignalAfferent ${botPhone}] Error downloading attachment:`, error);
+      return null;
+    }
+  }
+
+  private async handleMessage(data: string): Promise<void> {
     const { botPhone } = this.context.config;
 
     console.log(`[SignalAfferent ${botPhone}] Received WebSocket message:`, data.substring(0, 200));
@@ -167,6 +199,45 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
           console.log(`[SignalAfferent ${botPhone}] dataMessage.mentions:`, JSON.stringify(dataMessage.mentions));
         }
 
+        // Process attachments - download images and convert to base64
+        const rawAttachments = dataMessage.attachments || [];
+        const processedAttachments = [];
+
+        for (const attachment of rawAttachments) {
+          const contentType = attachment.contentType || '';
+          const isImage = contentType.startsWith('image/');
+
+          if (isImage && attachment.id) {
+            // Download image and convert to base64
+            const base64Data = await this.downloadAttachment(attachment.id);
+            if (base64Data) {
+              processedAttachments.push({
+                id: attachment.id,
+                contentType: attachment.contentType,
+                filename: attachment.filename,
+                size: attachment.size,
+                data: base64Data
+              });
+            } else {
+              // Failed to download, include metadata only
+              processedAttachments.push({
+                id: attachment.id,
+                contentType: attachment.contentType,
+                filename: attachment.filename,
+                size: attachment.size
+              });
+            }
+          } else {
+            // Non-image attachment, include metadata only
+            processedAttachments.push({
+              id: attachment.id,
+              contentType: attachment.contentType,
+              filename: attachment.filename,
+              size: attachment.size
+            });
+          }
+        }
+
         // Build stream ID for this conversation
         // Check both groupInfo and groupV2 (Signal uses different fields for different group versions)
         const groupInfo = dataMessage.groupInfo || dataMessage.groupV2;
@@ -185,7 +256,7 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
             sourceUuid,
             groupId,
             message: dataMessage.message || '',
-            attachments: dataMessage.attachments || [],
+            attachments: processedAttachments,
             mentions: dataMessage.mentions || [],
             quote: dataMessage.quote,
             timestamp: envelope.timestamp,

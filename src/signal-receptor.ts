@@ -215,7 +215,14 @@ export class SignalMessageReceptor extends BaseReceptor {
               conversationKey,
               isGroupChat,
               botPhone,
-              timestamp
+              timestamp,
+              attachments: attachments?.map((a: any) => ({
+                contentType: a.contentType,
+                filename: a.filename,
+                id: a.id,
+                size: a.size,
+                data: a.data  // base64 encoded image data (if downloaded)
+              }))
             }
           },
           attributes: {
@@ -230,7 +237,9 @@ export class SignalMessageReceptor extends BaseReceptor {
             attachments: attachments?.map((a: any) => ({
               contentType: a.contentType,
               filename: a.filename,
-              id: a.id
+              id: a.id,
+              size: a.size,
+              data: a.data  // base64 encoded image data (if downloaded)
             }))
           },
           children: [speechFacet] // Speech nested inside message
