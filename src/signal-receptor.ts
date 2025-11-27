@@ -40,6 +40,7 @@ export class SignalMessageReceptor extends BaseReceptor {
       botPhone,
       source,
       sourceUuid,
+      sourceName, // Signal display name from envelope
       groupId,
       message,
       attachments,
@@ -83,17 +84,21 @@ export class SignalMessageReceptor extends BaseReceptor {
     const existingMessage = state.facets.get(messageId);
     const messageAlreadyExists = !!existingMessage;
 
-    // Extract display name from existing state or use phone/uuid
-    let displayName = source;
-
     // Look up cached display name from VEIL state
     const profileFacet = Array.from(state.facets.values())
       .find(f => f.type === 'user-profile' &&
                  (f.attributes?.phoneNumber === source || f.attributes?.uuid === sourceUuid));
-    if (profileFacet?.attributes?.displayName) {
-      displayName = profileFacet.attributes.displayName;
-    } else if (profileFacet?.content) {
-      displayName = profileFacet.content;
+
+    // Extract display name - prefer sourceName from envelope, then cached profile, then source
+    let displayName = sourceName || source;
+
+    // If no sourceName from envelope, use cached profile
+    if (!sourceName) {
+      if (profileFacet?.attributes?.displayName) {
+        displayName = profileFacet.attributes.displayName;
+      } else if (profileFacet?.content) {
+        displayName = profileFacet.content;
+      }
     }
 
     // Check if bot was mentioned (check both UUID and phone number)

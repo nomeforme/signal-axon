@@ -184,6 +184,7 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
       // Extract basic message info
       const source = envelope.source || envelope.sourceNumber || 'unknown';
       const sourceUuid = envelope.sourceUuid || '';
+      const sourceName = envelope.sourceName || ''; // Signal display name
       const timestamp = envelope.timestamp || Date.now();
       const dataMessage = envelope.dataMessage || {};
       const receiptMessage = envelope.receiptMessage || {};
@@ -260,6 +261,7 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
             botPhone,
             source,
             sourceUuid,
+            sourceName, // Signal display name
             groupId,
             message: dataMessage.message || '',
             attachments: processedAttachments,

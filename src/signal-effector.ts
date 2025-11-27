@@ -106,16 +106,14 @@ export class SignalSpeechEffector extends BaseEffector {
     let content = facet.content;
     if (!content) return;
 
-    // Strip HUD rendering tags (these are for display only, not for sending)
-    // Remove all XML-like tags (<my_turn>, <event>, etc.)
-    content = content.replace(/<[^>]+>/g, '').trim();
+    console.log(`[SignalSpeechEffector] Original content (first 100 chars): "${content.substring(0, 100)}"`);
+    console.log(`[SignalSpeechEffector] Facet agentName: ${facet.agentName}, agentId: ${facet.agentId}`);
 
-    // Strip speaker prefix (e.g., "Claude: " or "+12186633092: ")
-    // The HUD may prepend speaker names to content for rendering
+    // Strip speaker prefix (e.g., "haiku-4-5: " or "sonnet-4-5: ")
+    // The prefix is added by SpeakerPrefixReceptor for internal identification
     content = content.replace(/^[^:]+:\s*/, '').trim();
 
     // Strip Object Replacement Character (U+FFFC) used for mentions
-    // We're not handling mentions in responses yet, so remove these placeholder characters
     content = content.replace(/\uFFFC/g, '').trim();
 
     // Get stream context (check both root level and attributes)
