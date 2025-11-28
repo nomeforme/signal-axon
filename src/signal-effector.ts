@@ -25,6 +25,13 @@ function createNameToPhoneMap(botNames: Map<string, string>): Map<string, string
   return nameToPhone;
 }
 
+// Mention structure for Signal API
+interface SignalMention {
+  start: number;
+  length: number;
+  author: string; // phone number
+}
+
 /**
  * SignalSpeechEffector sends speech facets to Signal
  */
@@ -113,9 +120,6 @@ export class SignalSpeechEffector extends BaseEffector {
     // The prefix is added by SpeakerPrefixReceptor for internal identification
     content = content.replace(/^[^:]+:\s*/, '').trim();
 
-    // Strip Object Replacement Character (U+FFFC) used for mentions
-    content = content.replace(/\uFFFC/g, '').trim();
-
     // Get stream context (check both root level and attributes)
     const streamId = facet.streamId || facet.attributes?.streamId;
     if (!streamId) {
@@ -167,10 +171,22 @@ export class SignalSpeechEffector extends BaseEffector {
       }
     }
 
-    // Split message if too long
-    const chunks = this.splitMessage(content);
+    // Detect mentions in text (only for group chats)
+    let processedContent = content;
+    let mentions: SignalMention[] = [];
+    if (isGroupChat) {
+      const result = this.detectMentions(content, state);
+      processedContent = result.text;
+      mentions = result.mentions;
+      if (mentions.length > 0) {
+        console.log(`[SignalSpeechEffector] Detected ${mentions.length} mentions in message`);
+      }
+    }
 
-    // Send each chunk
+    // Split message if too long
+    const chunks = this.splitMessage(processedContent);
+
+    // Send each chunk (only first chunk gets mentions to avoid duplicate notifications)
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
 
@@ -180,6 +196,11 @@ export class SignalSpeechEffector extends BaseEffector {
         message: chunk,
         text_mode: 'styled' // Enable markdown formatting
       };
+
+      // Add mentions only to the first chunk
+      if (i === 0 && mentions.length > 0) {
+        payload.mentions = mentions;
+      }
 
       // TODO: Handle attachments from facet.attributes?.attachments
 
@@ -191,13 +212,93 @@ export class SignalSpeechEffector extends BaseEffector {
         if (chunks.length > 1) {
           console.log(`[SignalSpeechEffector] Message chunk ${i + 1}/${chunks.length} sent to ${recipientId}`);
         } else {
-          console.log(`[SignalSpeechEffector] Message sent to ${recipientId}`);
+          console.log(`[SignalSpeechEffector] Message sent to ${recipientId}${mentions.length > 0 ? ` with ${mentions.length} mentions` : ''}`);
         }
       } catch (error) {
         console.error(`[SignalSpeechEffector] Failed to send message chunk ${i + 1}:`, error);
         throw error;
       }
     }
+  }
+
+  /**
+   * Detect @mentions in text and convert to Signal mention format
+   * Looks for bot names and user display names, replaces with U+FFFC placeholder
+   */
+  private detectMentions(text: string, state: ReadonlyVEILState): { text: string; mentions: SignalMention[] } {
+    const mentions: SignalMention[] = [];
+    let modifiedText = text;
+
+    // Build name -> phone mapping from bot names
+    const nameToPhone = new Map<string, string>();
+    for (const [phone, name] of this.config.botNames) {
+      nameToPhone.set(name, phone);
+    }
+
+    // Add user display names from user-profile facets
+    for (const facet of state.facets.values()) {
+      if (facet.type === 'user-profile') {
+        const displayName = facet.attributes?.displayName || facet.content;
+        const phone = facet.attributes?.phoneNumber;
+        if (displayName && phone) {
+          nameToPhone.set(displayName, phone);
+        }
+      }
+    }
+
+    // Sort names by length (longest first) to avoid partial matches
+    const sortedNames = Array.from(nameToPhone.keys()).sort((a, b) => b.length - a.length);
+
+    for (const name of sortedNames) {
+      const phone = nameToPhone.get(name);
+      if (!phone) continue;
+
+      let searchPos = 0;
+      while (true) {
+        // Look for @name or just name at word boundaries
+        let pos = modifiedText.indexOf(`@${name}`, searchPos);
+        let hasAtSymbol = true;
+
+        if (pos === -1) {
+          pos = modifiedText.indexOf(name, searchPos);
+          hasAtSymbol = false;
+        }
+
+        if (pos === -1) break;
+
+        // Adjust position to account for @ symbol
+        const actualStart = hasAtSymbol ? pos : pos;
+        const matchLength = hasAtSymbol ? name.length + 1 : name.length;
+
+        // Check word boundaries
+        const charBefore = actualStart > 0 ? modifiedText[actualStart - 1] : ' ';
+        const charAfter = actualStart + matchLength < modifiedText.length ? modifiedText[actualStart + matchLength] : ' ';
+        const beforeOk = ' \n\t,.:;!?@'.includes(charBefore);
+        const afterOk = ' \n\t,.:;!?@'.includes(charAfter);
+
+        if (beforeOk && afterOk) {
+          // Calculate UTF-16 position (Signal uses UTF-16 offsets)
+          const utf16Start = Buffer.from(modifiedText.substring(0, actualStart), 'utf16le').length / 2;
+
+          // Replace the name with Signal's object replacement character
+          const replacement = '\uFFFC';
+          modifiedText = modifiedText.substring(0, actualStart) + replacement + modifiedText.substring(actualStart + matchLength);
+
+          console.log(`[SignalSpeechEffector] Creating mention for '${name}' -> phone: ${phone} at position ${utf16Start}`);
+          mentions.push({
+            start: utf16Start,
+            length: 1,
+            author: phone
+          });
+
+          searchPos = actualStart + 1;
+        } else {
+          searchPos = actualStart + 1;
+        }
+      }
+    }
+
+    return { text: modifiedText, mentions };
   }
 
   private splitMessage(content: string): string[] {

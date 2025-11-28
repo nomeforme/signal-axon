@@ -64,10 +64,9 @@ export class SignalMessageReceptor extends BaseReceptor {
     const isBotMessage = this.config.botUuids.has(source) ||
                          (sourceUuid && Array.from(this.config.botUuids.values()).includes(sourceUuid));
 
-    if (isBotMessage) {
-      // Skip bot messages - they'll be handled by agent facets
-      return [];
-    }
+    // Note: We no longer skip bot messages entirely here.
+    // Bot messages don't need to be stored (handled by agent facets),
+    // but we still need to check if THIS bot was mentioned by another bot.
 
     // Determine conversation key
     const conversationKey = groupId || source;
@@ -123,11 +122,79 @@ export class SignalMessageReceptor extends BaseReceptor {
     // Determine if bot should respond and if message should be stored in context
     let shouldRespond = false;
     let storeInHistory = true;
-    // Strip U+FFFC (Object Replacement Character) used as placeholder for mentions
-    // This character confuses the LLM if left in the message content
-    let processedMessage = message.replace(/\uFFFC/g, '').trim();
 
-    if (!isGroupChat) {
+    // Replace U+FFFC (Object Replacement Character) with actual mention names
+    // Signal uses FFFC as placeholder, we need to restore the @name for context
+    let processedMessage = message;
+    if (mentions && mentions.length > 0) {
+      // Sort mentions by position descending so we can replace from end to start
+      // (this prevents position shifts from affecting subsequent replacements)
+      const sortedMentions = [...mentions].sort((a: any, b: any) => (b.start || 0) - (a.start || 0));
+      for (const mention of sortedMentions) {
+        // Find the mention name - always look up from bot config first
+        let mentionName: string | undefined;
+
+        // First try to find bot name by UUID
+        for (const [phone, uuid] of this.config.botUuids.entries()) {
+          if (uuid === mention.uuid) {
+            mentionName = this.config.botNames.get(phone);
+            break;
+          }
+        }
+
+        // If not a bot, try to find by phone number
+        if (!mentionName && mention.number) {
+          mentionName = this.config.botNames.get(mention.number);
+        }
+
+        // Fall back to mention.name only if it's not a UUID or phone number pattern
+        if (!mentionName && mention.name) {
+          const isUuid = /^[0-9a-f-]{36}$/i.test(mention.name);
+          const isPhone = /^\+?\d+$/.test(mention.name);
+          if (!isUuid && !isPhone) {
+            mentionName = mention.name;
+          }
+        }
+
+        // Replace FFFC with @name
+        processedMessage = processedMessage.replace('\uFFFC', `@${mentionName || mention.name || mention.uuid || 'unknown'}`);
+      }
+    }
+    // Strip any remaining FFFC characters (shouldn't happen but just in case)
+    processedMessage = processedMessage.replace(/\uFFFC/g, '').trim();
+
+    // Bot messages are NOT stored in history (they're handled by agent facets)
+    // But we still check for mentions to trigger responses
+    if (isBotMessage) {
+      storeInHistory = false;
+      // Check if this bot was mentioned by another bot (but NOT by itself!)
+      const isSelfMention = sourceUuid === botUuid;
+      if (isSelfMention) {
+        console.log(`[SignalMessageReceptor] Ignoring self-mention from ${source} to ${botPhone}`);
+        shouldRespond = false;
+      } else if (botMentioned) {
+        // Bot-to-bot mention - check loop prevention limit
+        const maxBotMentions = this.config.maxBotMentionsPerConversation || 10;
+
+        // Count consecutive bot-to-bot interactions since last human message
+        // Counter is PER-BOT per stream to avoid race conditions
+        const counterFacetId = `bot-interaction-counter-${botPhone}-${streamId}`;
+        const counterFacet = state.facets.get(counterFacetId);
+        const currentCount = (counterFacet?.state as any)?.count || 0;
+
+        // Check BEFORE incrementing - allow if count is less than limit
+        if (currentCount < maxBotMentions) {
+          shouldRespond = true;
+          console.log(`[BOT LOOP PREVENTION] Bot ${botPhone} mentioned by bot. Will respond (${currentCount}/${maxBotMentions} interactions so far)`);
+        } else {
+          console.log(`[BOT LOOP PREVENTION] ⚠ Limit reached (${currentCount}/${maxBotMentions})! Skipping to prevent infinite loop.`);
+          shouldRespond = false;
+        }
+      } else {
+        shouldRespond = false;
+        console.log(`[SignalMessageReceptor] Bot message from ${source}, not mentioned`);
+      }
+    } else if (!isGroupChat) {
       // Always respond in DMs
       shouldRespond = true;
       storeInHistory = true;
@@ -183,6 +250,50 @@ export class SignalMessageReceptor extends BaseReceptor {
           if (!botMentioned && !quotedBot) {
             shouldRespond = false;
           }
+        }
+      }
+    }
+
+    // Bot loop prevention counter management (per-bot to avoid race conditions)
+    if (isGroupChat) {
+      const counterFacetId = `bot-interaction-counter-${botPhone}-${streamId}`;
+      const counterFacet = state.facets.get(counterFacetId);
+      const currentCount = (counterFacet?.state as any)?.count || 0;
+
+      if (isBotMessage && shouldRespond) {
+        // Increment counter for bot-to-bot interaction
+        // Remove old counter first if it exists
+        if (counterFacet) {
+          deltas.push({ type: 'removeFacet', id: counterFacetId });
+        }
+        deltas.push({
+          type: 'addFacet',
+          facet: {
+            id: counterFacetId,
+            type: 'bot-interaction-counter',
+            streamId,
+            botPhone,
+            aspects: { ephemeral: true },
+            state: { count: currentCount + 1 }
+          }
+        });
+        console.log(`[BOT LOOP PREVENTION] Incremented counter for ${botPhone} to ${currentCount + 1}`);
+      } else if (!isBotMessage) {
+        // Human message - reset counter for THIS bot
+        if (counterFacet && currentCount > 0) {
+          console.log(`[BOT LOOP PREVENTION] Human message detected. Resetting bot counter for ${botPhone}.`);
+          deltas.push({ type: 'removeFacet', id: counterFacetId });
+          deltas.push({
+            type: 'addFacet',
+            facet: {
+              id: counterFacetId,
+              type: 'bot-interaction-counter',
+              streamId,
+              botPhone,
+              aspects: { ephemeral: true },
+              state: { count: 0 }
+            }
+          });
         }
       }
     }
@@ -312,7 +423,7 @@ export class SignalMessageReceptor extends BaseReceptor {
       deltas.push({
         type: 'addFacet',
         facet: {
-          id: `signal-activation-${timestamp}`,
+          id: `signal-activation-${botPhone}-${timestamp}`,
           type: 'agent-activation',
           aspects: {
             ephemeral: true

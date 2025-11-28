@@ -25,6 +25,7 @@ interface MessageTracker {
   quote?: { authorUuid?: string; author?: string }; // Quote info if message is a reply
   timeout: NodeJS.Timeout;
   messagePayload: any; // Store the full message payload for re-processing
+  isBotMessage: boolean; // Whether this message is from another bot
 }
 
 export class MessageConsistencyReceptor extends BaseReceptor {
@@ -41,12 +42,15 @@ export class MessageConsistencyReceptor extends BaseReceptor {
 
   transform(event: SpaceEvent, state: ReadonlyVEILState): VEILDelta[] {
     const payload = event.payload as any;
-    const { source, timestamp, botPhone, mentions, quote, groupId } = payload;
+    const { source, sourceUuid, timestamp, botPhone, mentions, quote, groupId } = payload;
 
     // Only check consistency for group messages
     if (!groupId) {
       return [];
     }
+
+    // Check if the message is from a bot
+    const isBotMessage = Array.from(this.config.botUuids.values()).includes(sourceUuid);
 
     const messageId = `${source}-${timestamp}`;
 
@@ -61,6 +65,7 @@ export class MessageConsistencyReceptor extends BaseReceptor {
         mentions: mentions || [],
         quote: quote, // Track quote/reply info
         messagePayload: payload, // Store full payload for re-processing
+        isBotMessage, // Track if this is a bot-to-bot message
         timeout: setTimeout(() => this.checkConsistency(messageId), this.CONSISTENCY_CHECK_DELAY)
       };
       this.messageTrackers.set(messageId, tracker);
@@ -106,6 +111,10 @@ export class MessageConsistencyReceptor extends BaseReceptor {
         }
       }
     }
+
+    // NOTE: Bot-to-bot mention triggering is handled by SignalMessageReceptor with loop prevention.
+    // The consistency checker should NOT re-trigger bot mentions, only handle missed messages.
+    // Previously this code would re-queue all mentioned bots, causing infinite loops.
 
     // Check quote/reply - if message quotes a bot, that bot should receive it
     if (tracker.quote) {
