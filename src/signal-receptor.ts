@@ -82,7 +82,8 @@ export class SignalMessageReceptor extends BaseReceptor {
       attachments,
       mentions,
       quote,
-      timestamp
+      timestamp,
+      __reprocessed // Flag from consistency checker for re-processed messages
     } = payload;
 
     console.log(`[SignalMessageReceptor] Processing message from ${source}: "${message}" (botPhone: ${botPhone})`);
@@ -474,27 +475,34 @@ export class SignalMessageReceptor extends BaseReceptor {
     if (!isGroupChat) {
       // DM - activate the receiving bot
       if (shouldRespond) {
-        const botName = this.config.botNames.get(botPhone);
-        console.log(`[SignalMessageReceptor] Creating agent-activation for DM: botPhone ${botPhone}, targetAgent: ${botName}`);
+        const activationId = `signal-activation-${botPhone}-${timestamp}`;
 
-        deltas.push({
-          type: 'addFacet',
-          facet: {
-            id: `signal-activation-${botPhone}-${timestamp}`,
-            type: 'agent-activation',
-            aspects: { ephemeral: true },
-            state: {
-              targetAgent: botName,
-              streamRef: { streamId, elementId: 'space', elementPath: [] },
-              streamId,
-              conversationKey,
-              triggeredBy: messageId,
-              botPhone,
-              reason: 'dm'
-            },
-            attributes: { streamId, conversationKey, triggeredBy: messageId, botPhone, reason: 'dm' }
-          }
-        });
+        // Skip if activation already exists (prevents duplicates from consistency checker re-processing)
+        if (state.facets.get(activationId)) {
+          console.log(`[SignalMessageReceptor] Skipping duplicate activation: ${activationId}`);
+        } else {
+          const botName = this.config.botNames.get(botPhone);
+          console.log(`[SignalMessageReceptor] Creating agent-activation for DM: botPhone ${botPhone}, targetAgent: ${botName}`);
+
+          deltas.push({
+            type: 'addFacet',
+            facet: {
+              id: activationId,
+              type: 'agent-activation',
+              aspects: { ephemeral: true },
+              state: {
+                targetAgent: botName,
+                streamRef: { streamId, elementId: 'space', elementPath: [] },
+                streamId,
+                conversationKey,
+                triggeredBy: messageId,
+                botPhone,
+                reason: 'dm'
+              },
+              attributes: { streamId, conversationKey, triggeredBy: messageId, botPhone, reason: 'dm' }
+            }
+          });
+        }
       }
     } else {
       // Group chat - check ALL bots for mentions/quotes and create activations
@@ -510,17 +518,23 @@ export class SignalMessageReceptor extends BaseReceptor {
         let targetShouldRespond = targetMentioned || targetQuoted;
 
         // Bot-to-bot loop prevention
+        // Skip entirely for re-processed messages to avoid stale counter checks
         if (targetShouldRespond && isBotMessage) {
-          const maxBotMentions = this.config.maxBotMentionsPerConversation || 10;
-          const counterFacetId = `bot-interaction-counter-${targetBotPhone}-${streamId}`;
-          const counterFacet = state.facets.get(counterFacetId);
-          const currentCount = (counterFacet?.state as any)?.count || 0;
-
-          if (currentCount >= maxBotMentions) {
-            console.log(`[BOT LOOP PREVENTION] ⚠ Bot ${targetBotPhone} at limit (${currentCount}/${maxBotMentions}), skipping`);
+          if (__reprocessed) {
+            console.log(`[BOT LOOP PREVENTION] Skipping bot-to-bot check for re-processed message`);
             targetShouldRespond = false;
           } else {
-            console.log(`[BOT LOOP PREVENTION] Bot ${targetBotPhone} mentioned by bot (${currentCount}/${maxBotMentions})`);
+            const maxBotMentions = this.config.maxBotMentionsPerConversation || 10;
+            const counterFacetId = `bot-interaction-counter-${targetBotPhone}-${streamId}`;
+            const counterFacet = state.facets.get(counterFacetId);
+            const currentCount = (counterFacet?.state as any)?.count || 0;
+
+            if (currentCount >= maxBotMentions) {
+              console.log(`[BOT LOOP PREVENTION] ⚠ Bot ${targetBotPhone} at limit (${currentCount}/${maxBotMentions}), skipping`);
+              targetShouldRespond = false;
+            } else {
+              console.log(`[BOT LOOP PREVENTION] Bot ${targetBotPhone} mentioned by bot (${currentCount}/${maxBotMentions})`);
+            }
           }
         }
 
@@ -537,13 +551,21 @@ export class SignalMessageReceptor extends BaseReceptor {
         }
 
         if (targetShouldRespond) {
+          const activationId = `signal-activation-${targetBotPhone}-${timestamp}`;
+
+          // Skip if activation already exists (prevents duplicates from consistency checker re-processing)
+          if (state.facets.get(activationId)) {
+            console.log(`[SignalMessageReceptor] Skipping duplicate activation: ${activationId}`);
+            continue;
+          }
+
           const reason = targetMentioned ? 'mention' : targetQuoted ? 'quote' : 'random';
           console.log(`[SignalMessageReceptor] Creating agent-activation for group: botPhone ${targetBotPhone}, targetAgent: ${targetBotName}, reason: ${reason}`);
 
           deltas.push({
             type: 'addFacet',
             facet: {
-              id: `signal-activation-${targetBotPhone}-${timestamp}`,
+              id: activationId,
               type: 'agent-activation',
               aspects: { ephemeral: true },
               state: {
