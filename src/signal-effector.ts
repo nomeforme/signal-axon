@@ -343,3 +343,184 @@ export class SignalSpeechEffector extends BaseEffector {
     return chunks;
   }
 }
+
+/**
+ * Callback type for updating config values
+ */
+export type ConfigUpdateCallback = (updates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number }) => void;
+
+/**
+ * SignalCommandEffector handles command facets (!rr, !bb, !help)
+ * and sends responses via Signal
+ */
+export class SignalCommandEffector extends BaseEffector {
+  private config: SignalEffectorConfig;
+  private onConfigUpdate?: ConfigUpdateCallback;
+  private groupIdCache = new Map<string, string>(); // Cache internal_id -> external id mappings
+
+  constructor(config: SignalEffectorConfig, onConfigUpdate?: ConfigUpdateCallback) {
+    super();
+    this.config = config;
+    this.onConfigUpdate = onConfigUpdate;
+  }
+
+  /**
+   * Convert internal group ID to external group ID that the API expects
+   */
+  private async convertGroupId(internalId: string, botPhone: string): Promise<string | null> {
+    const cached = this.groupIdCache.get(internalId);
+    if (cached) return cached;
+
+    const url = `${this.config.apiUrl}/v1/groups/${botPhone}`;
+    try {
+      const response = await axios.get(url);
+      const groups = response.data;
+
+      for (const group of groups) {
+        if (group.internal_id === internalId) {
+          this.groupIdCache.set(internalId, group.id);
+          return group.id;
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error(`[SignalCommandEffector] Error fetching groups:`, error);
+      return null;
+    }
+  }
+
+  async process(changes: FacetDelta[], state: ReadonlyVEILState): Promise<EffectorResult> {
+    for (const change of changes) {
+      if (change.type === 'added' && change.facet.type === 'signal-command') {
+        try {
+          await this.handleCommand(change.facet, state);
+        } catch (error) {
+          console.error('[SignalCommandEffector] Error handling command:', error);
+        }
+      }
+    }
+
+    return { events: [] };
+  }
+
+  private async handleCommand(facet: any, state: ReadonlyVEILState): Promise<void> {
+    const { command, args, botPhone, source, groupId, currentConfig } = facet.state;
+
+    console.log(`[SignalCommandEffector] Handling command: ${command} ${args}`);
+
+    let response = '';
+    let configUpdates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number } | null = null;
+
+    switch (command) {
+      case '!help':
+        response = `📋 *Available Commands*
+
+!rr [number] - Random reply chance
+  • 0 = disabled
+  • 1 = 100% (reply to every message)
+  • 10 = 10%, 100 = 1%, etc.
+  • No argument shows current setting
+
+!bb [number] - Bot-to-bot mention limit
+  • Max mentions before requiring human message
+  • 0 = disabled, 1+ = limit
+  • No argument shows current setting
+
+!help - Show this message`;
+        break;
+
+      case '!rr':
+        if (!args) {
+          // Show current setting
+          const chance = currentConfig.randomReplyChance;
+          if (chance === 0) {
+            response = 'Random reply is currently disabled (0)';
+          } else {
+            const percentage = (100 / chance).toFixed(1);
+            response = `Random reply: 1/${chance} (${percentage}%)`;
+          }
+        } else {
+          const newChance = parseInt(args);
+          if (isNaN(newChance) || newChance < 0) {
+            response = '❌ Invalid value. Use a number >= 0 (0 = disabled, 1 = 100%, 10 = 10%, etc.)';
+          } else {
+            configUpdates = { randomReplyChance: newChance };
+            if (newChance === 0) {
+              response = '✅ Random reply disabled';
+            } else if (newChance === 1) {
+              response = '✅ Random reply set to 1/1 (100%) - bots will reply to every message';
+            } else {
+              const percentage = (100 / newChance).toFixed(1);
+              response = `✅ Random reply set to 1/${newChance} (${percentage}%)`;
+            }
+          }
+        }
+        break;
+
+      case '!bb':
+        if (!args) {
+          // Show current setting
+          const limit = currentConfig.maxBotMentionsPerConversation;
+          if (limit === 0) {
+            response = 'Bot-to-bot mentions are currently disabled (0)';
+          } else {
+            response = `Bot-to-bot mention limit: ${limit}`;
+          }
+        } else {
+          const newLimit = parseInt(args);
+          if (isNaN(newLimit) || newLimit < 0) {
+            response = '❌ Invalid value. Use a number >= 0 (0 = disabled)';
+          } else {
+            configUpdates = { maxBotMentionsPerConversation: newLimit };
+            if (newLimit === 0) {
+              response = '✅ Bot-to-bot mentions disabled';
+            } else {
+              response = `✅ Bot-to-bot mention limit set to ${newLimit}`;
+            }
+          }
+        }
+        break;
+
+      default:
+        response = `Unknown command: ${command}. Use !help for available commands.`;
+    }
+
+    // Update config if needed
+    if (configUpdates && this.onConfigUpdate) {
+      this.onConfigUpdate(configUpdates);
+    }
+
+    // Send response
+    await this.sendResponse(response, botPhone, source, groupId);
+  }
+
+  private async sendResponse(message: string, botPhone: string, source: string, groupId?: string): Promise<void> {
+    // For group chats, convert internal group ID to external group ID
+    let recipientId = source;
+    if (groupId) {
+      const externalGroupId = await this.convertGroupId(groupId, botPhone);
+      if (externalGroupId) {
+        recipientId = externalGroupId;
+      } else {
+        console.warn(`[SignalCommandEffector] Failed to convert group ID, using internal ID`);
+        recipientId = groupId;
+      }
+    }
+
+    const payload: any = {
+      number: botPhone,
+      recipients: [recipientId],
+      message,
+      text_mode: 'styled'
+    };
+
+    const url = `${this.config.apiUrl}/v2/send`;
+
+    try {
+      await axios.post(url, payload);
+      console.log(`[SignalCommandEffector] Response sent to ${recipientId}`);
+    } catch (error) {
+      console.error(`[SignalCommandEffector] Failed to send response:`, error);
+    }
+  }
+}

@@ -34,6 +34,42 @@ export class SignalMessageReceptor extends BaseReceptor {
     this.config = config;
   }
 
+  /**
+   * Update config at runtime (called by command effector)
+   */
+  updateConfig(updates: Partial<SignalReceptorConfig>): void {
+    this.config = { ...this.config, ...updates };
+    console.log('[SignalMessageReceptor] Config updated:', updates);
+  }
+
+  /**
+   * Get current config values (for displaying current settings)
+   */
+  getConfig(): SignalReceptorConfig {
+    return this.config;
+  }
+
+  /**
+   * Parse command from message text
+   * Returns { command, args } or null if not a command
+   * Handles messages that start with mention placeholder (FFFC) before the command
+   */
+  private parseCommand(message: string): { command: string; args: string } | null {
+    if (!message) return null;
+
+    // Strip leading FFFC (mention placeholder) and whitespace
+    // Message format is typically: "￼ !command args" where ￼ is FFFC
+    let cleaned = message.replace(/^\uFFFC\s*/g, '').trim();
+
+    if (!cleaned.startsWith('!')) return null;
+
+    const parts = cleaned.split(/\s+/);
+    const command = parts[0].toLowerCase();
+    const args = parts.slice(1).join(' ').trim();
+
+    return { command, args };
+  }
+
   transform(event: SpaceEvent, state: ReadonlyVEILState): VEILDelta[] {
     const payload = event.payload as any;
     const {
@@ -129,6 +165,56 @@ export class SignalMessageReceptor extends BaseReceptor {
     console.log(`[SignalMessageReceptor] botPhone: ${botPhone}, botUuid: ${botUuid}, mentioned: ${botMentioned}, quoted: ${quotedBot}`);
     if (quote) {
       console.log(`[SignalMessageReceptor] Quote: authorUuid=${quote.authorUuid}, author=${quote.author}`);
+    }
+
+    // Find the first mentioned bot (for command handling)
+    const mentionedBotPhone = Array.from(this.config.botNames.keys()).find(phone => isBotMentioned(phone));
+
+    // Parse commands - only process if a bot was mentioned and message starts with !
+    // IMPORTANT: Only the mentioned bot should create the command facet
+    // With multiple bots in separate processes, each one receives the message
+    // We must ensure only ONE bot (the mentioned one) handles the command
+    // BUT all bots must return early to prevent agent-activations for command messages
+    const parsed = this.parseCommand(message);
+    if (parsed && mentionedBotPhone && !isBotMessage) {
+      const { command, args } = parsed;
+
+      // Handle recognized commands
+      if (command === '!rr' || command === '!bb' || command === '!help') {
+        // Only the mentioned bot creates the command facet
+        if (mentionedBotPhone === botPhone) {
+          console.log(`[SignalMessageReceptor] Command detected: ${command} ${args} (this bot: ${botPhone})`);
+
+          // Create command facet for effector to handle
+          deltas.push({
+            type: 'addFacet',
+            facet: {
+              id: `signal-command-${timestamp}`,
+              type: 'signal-command',
+              streamId,
+              aspects: { ephemeral: true },
+              state: {
+                command,
+                args,
+                botPhone: mentionedBotPhone,
+                source,
+                groupId,
+                timestamp,
+                currentConfig: {
+                  randomReplyChance: this.config.randomReplyChance || 0,
+                  maxBotMentionsPerConversation: this.config.maxBotMentionsPerConversation || 10
+                }
+              }
+            }
+          });
+        } else {
+          console.log(`[SignalMessageReceptor] Command message, but not mentioned bot (this: ${botPhone}, mentioned: ${mentionedBotPhone})`);
+        }
+
+        // ALL bots return early for command messages - no agent activations
+        // Don't store command messages in history
+        return deltas;
+      }
     }
 
     // Determine if bot should respond and if message should be stored in context
@@ -239,13 +325,14 @@ export class SignalMessageReceptor extends BaseReceptor {
       }
 
       // Random reply feature: Give bot a chance to respond even when not mentioned
-      // randomReplyChance is 1-100 where:
-      // - 1 = 100% chance (always reply)
-      // - 100 = 1% chance (1/100)
-      // - 10 = 10% chance (1/10)
+      // randomReplyChance represents "1 in N" chance:
+      // - 1 = 100% chance (1 in 1)
+      // - 10 = 10% chance (1 in 10)
+      // - 100 = 1% chance (1 in 100)
+      // - 200 = 0.5% chance (1 in 200)
       if (!shouldRespond && randomReplyChance > 0 && storeInHistory) {
-        const roll = Math.floor(Math.random() * 100) + 1;
-        shouldRespond = roll <= (100 / randomReplyChance);
+        const roll = Math.floor(Math.random() * randomReplyChance) + 1;
+        shouldRespond = roll === 1; // 1 in N chance
       }
 
       // Check max bot mentions per conversation
@@ -441,8 +528,8 @@ export class SignalMessageReceptor extends BaseReceptor {
         if (!targetShouldRespond && !isBotMessage && storeInHistory) {
           const randomReplyChance = this.config.randomReplyChance || 0;
           if (randomReplyChance > 0) {
-            const roll = Math.floor(Math.random() * 100) + 1;
-            targetShouldRespond = roll <= (100 / randomReplyChance);
+            const roll = Math.floor(Math.random() * randomReplyChance) + 1;
+            targetShouldRespond = roll === 1; // 1 in N chance
             if (targetShouldRespond) {
               console.log(`[SignalMessageReceptor] Random reply triggered for ${targetBotPhone}`);
             }

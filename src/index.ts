@@ -6,7 +6,7 @@
 
 import { SignalAfferent, SignalAfferentConfig } from './signal-afferent';
 import { SignalMessageReceptor, SignalReceiptReceptor, SignalTypingReceptor, SignalReceptorConfig } from './signal-receptor';
-import { SignalSpeechEffector, SignalEffectorConfig } from './signal-effector';
+import { SignalSpeechEffector, SignalCommandEffector, SignalEffectorConfig, ConfigUpdateCallback } from './signal-effector';
 import { MessageConsistencyReceptor, MessageConsistencyConfig } from './message-consistency-receptor';
 import { messageDeduplicator } from './message-deduplicator';
 
@@ -19,7 +19,9 @@ export {
   SignalTypingReceptor,
   SignalReceptorConfig,
   SignalSpeechEffector,
+  SignalCommandEffector,
   SignalEffectorConfig,
+  ConfigUpdateCallback,
   MessageConsistencyReceptor,
   MessageConsistencyConfig,
   messageDeduplicator
