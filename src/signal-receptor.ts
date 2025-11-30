@@ -19,6 +19,8 @@ export interface SignalReceptorConfig {
   randomReplyChance?: number;
   // Maximum bot mentions allowed per conversation before requiring explicit mention
   maxBotMentionsPerConversation?: number;
+  // Maximum conversation frames to include in context (rolling window)
+  maxConversationFrames?: number;
 }
 
 /**
@@ -181,36 +183,34 @@ export class SignalMessageReceptor extends BaseReceptor {
       const { command, args } = parsed;
 
       // Handle recognized commands
-      if (command === '!rr' || command === '!bb' || command === '!help') {
-        // Only the mentioned bot creates the command facet
-        if (mentionedBotPhone === botPhone) {
-          console.log(`[SignalMessageReceptor] Command detected: ${command} ${args} (this bot: ${botPhone})`);
+      if (command === '!rr' || command === '!bb' || command === '!mf' || command === '!help') {
+        // With shared VEIL state and deduplication, only one bot emits the event
+        // Create the command facet for the mentioned bot regardless of which bot emitted
+        console.log(`[SignalMessageReceptor] Command detected: ${command} ${args} (mentioned bot: ${mentionedBotPhone})`);
 
-          // Create command facet for effector to handle
-          deltas.push({
-            type: 'addFacet',
-            facet: {
-              id: `signal-command-${timestamp}`,
-              type: 'signal-command',
-              streamId,
-              aspects: { ephemeral: true },
-              state: {
-                command,
-                args,
-                botPhone: mentionedBotPhone,
-                source,
-                groupId,
-                timestamp,
-                currentConfig: {
-                  randomReplyChance: this.config.randomReplyChance || 0,
-                  maxBotMentionsPerConversation: this.config.maxBotMentionsPerConversation || 10
-                }
+        // Create command facet for effector to handle
+        deltas.push({
+          type: 'addFacet',
+          facet: {
+            id: `signal-command-${timestamp}`,
+            type: 'signal-command',
+            streamId,
+            aspects: { ephemeral: true },
+            state: {
+              command,
+              args,
+              botPhone: mentionedBotPhone,
+              source,
+              groupId,
+              timestamp,
+              currentConfig: {
+                randomReplyChance: this.config.randomReplyChance || 0,
+                maxBotMentionsPerConversation: this.config.maxBotMentionsPerConversation ?? 10,
+                maxConversationFrames: this.config.maxConversationFrames ?? 8000
               }
             }
-          });
-        } else {
-          console.log(`[SignalMessageReceptor] Command message, but not mentioned bot (this: ${botPhone}, mentioned: ${mentionedBotPhone})`);
-        }
+          }
+        });
 
         // ALL bots return early for command messages - no agent activations
         // Don't store command messages in history

@@ -347,7 +347,7 @@ export class SignalSpeechEffector extends BaseEffector {
 /**
  * Callback type for updating config values
  */
-export type ConfigUpdateCallback = (updates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number }) => void;
+export type ConfigUpdateCallback = (updates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number; maxConversationFrames?: number }) => void;
 
 /**
  * SignalCommandEffector handles command facets (!rr, !bb, !help)
@@ -409,7 +409,7 @@ export class SignalCommandEffector extends BaseEffector {
     console.log(`[SignalCommandEffector] Handling command: ${command} ${args}`);
 
     let response = '';
-    let configUpdates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number } | null = null;
+    let configUpdates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number; maxConversationFrames?: number } | null = null;
 
     switch (command) {
       case '!help':
@@ -424,6 +424,11 @@ export class SignalCommandEffector extends BaseEffector {
 !bb [number] - Bot-to-bot mention limit
   • Max mentions before requiring human message
   • 0 = disabled, 1+ = limit
+  • No argument shows current setting
+
+!mf [number] - Max conversation frames
+  • Rolling window for context (default: 8000)
+  • ~2 frames per message, 8000 ≈ 4000 messages
   • No argument shows current setting
 
 !help - Show this message`;
@@ -477,6 +482,22 @@ export class SignalCommandEffector extends BaseEffector {
             } else {
               response = `✅ Bot-to-bot mention limit set to ${newLimit}`;
             }
+          }
+        }
+        break;
+
+      case '!mf':
+        if (!args) {
+          // Show current setting
+          const maxFrames = currentConfig.maxConversationFrames ?? 8000;
+          response = `Max conversation frames: ${maxFrames} (~${Math.floor(maxFrames / 2)} messages)`;
+        } else {
+          const newMaxFrames = parseInt(args);
+          if (isNaN(newMaxFrames) || newMaxFrames < 100) {
+            response = '❌ Invalid value. Use a number >= 100';
+          } else {
+            configUpdates = { maxConversationFrames: newMaxFrames };
+            response = `✅ Max conversation frames set to ${newMaxFrames} (~${Math.floor(newMaxFrames / 2)} messages)`;
           }
         }
         break;
