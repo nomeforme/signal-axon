@@ -255,45 +255,36 @@ export class SignalSpeechEffector extends BaseEffector {
 
       let searchPos = 0;
       while (true) {
-        // Look for @name or just name at word boundaries
-        let pos = modifiedText.indexOf(`@${name}`, searchPos);
-        let hasAtSymbol = true;
-
-        if (pos === -1) {
-          pos = modifiedText.indexOf(name, searchPos);
-          hasAtSymbol = false;
-        }
+        // ONLY look for @name patterns - NOT bare names
+        // Bare names like "3-7-sonnet:" at the start are speaker prefixes, not mentions
+        const pos = modifiedText.indexOf(`@${name}`, searchPos);
 
         if (pos === -1) break;
 
-        // Adjust position to account for @ symbol
-        const actualStart = hasAtSymbol ? pos : pos;
-        const matchLength = hasAtSymbol ? name.length + 1 : name.length;
+        const matchLength = name.length + 1; // +1 for @ symbol
 
-        // Check word boundaries
-        const charBefore = actualStart > 0 ? modifiedText[actualStart - 1] : ' ';
-        const charAfter = actualStart + matchLength < modifiedText.length ? modifiedText[actualStart + matchLength] : ' ';
-        const beforeOk = ' \n\t,.:;!?@'.includes(charBefore);
-        const afterOk = ' \n\t,.:;!?@'.includes(charAfter);
+        // Check word boundaries (character after the name)
+        const charAfter = pos + matchLength < modifiedText.length ? modifiedText[pos + matchLength] : ' ';
+        const afterOk = ' \n\t,.:;!?'.includes(charAfter);
 
-        if (beforeOk && afterOk) {
+        if (afterOk) {
           // Calculate UTF-16 position (Signal uses UTF-16 offsets)
-          const utf16Start = Buffer.from(modifiedText.substring(0, actualStart), 'utf16le').length / 2;
+          const utf16Start = Buffer.from(modifiedText.substring(0, pos), 'utf16le').length / 2;
 
-          // Replace the name with Signal's object replacement character
+          // Replace @name with Signal's object replacement character
           const replacement = '\uFFFC';
-          modifiedText = modifiedText.substring(0, actualStart) + replacement + modifiedText.substring(actualStart + matchLength);
+          modifiedText = modifiedText.substring(0, pos) + replacement + modifiedText.substring(pos + matchLength);
 
-          console.log(`[SignalSpeechEffector] Creating mention for '${name}' -> phone: ${phone} at position ${utf16Start}`);
+          console.log(`[SignalSpeechEffector] Creating mention for '@${name}' -> phone: ${phone} at position ${utf16Start}`);
           mentions.push({
             start: utf16Start,
             length: 1,
             author: phone
           });
 
-          searchPos = actualStart + 1;
+          searchPos = pos + 1;
         } else {
-          searchPos = actualStart + 1;
+          searchPos = pos + 1;
         }
       }
     }

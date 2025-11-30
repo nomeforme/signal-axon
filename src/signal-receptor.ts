@@ -223,21 +223,24 @@ export class SignalMessageReceptor extends BaseReceptor {
     let storeInHistory = true;
 
     // Replace U+FFFC (Object Replacement Character) with actual mention names
-    // Signal uses FFFC as placeholder, we need to restore the @name for context
+    // Signal uses FFFC as placeholder at specific positions, we need to restore @name for context
     let processedMessage = message;
     if (mentions && mentions.length > 0) {
       // Sort mentions by position descending so we can replace from end to start
       // (this prevents position shifts from affecting subsequent replacements)
-      const sortedMentions = [...mentions].sort((a: any, b: any) => (b.start || 0) - (a.start || 0));
+      const sortedMentions = [...mentions].sort((a: any, b: any) => (b.start ?? 0) - (a.start ?? 0));
+
       for (const mention of sortedMentions) {
-        // Find the mention name - always look up from bot config first
+        // Find the display name for this mention
         let mentionName: string | undefined;
 
         // First try to find bot name by UUID
-        for (const [phone, uuid] of this.config.botUuids.entries()) {
-          if (uuid === mention.uuid) {
-            mentionName = this.config.botNames.get(phone);
-            break;
+        if (mention.uuid) {
+          for (const [phone, uuid] of this.config.botUuids.entries()) {
+            if (uuid === mention.uuid) {
+              mentionName = this.config.botNames.get(phone);
+              break;
+            }
           }
         }
 
@@ -246,7 +249,18 @@ export class SignalMessageReceptor extends BaseReceptor {
           mentionName = this.config.botNames.get(mention.number);
         }
 
-        // Fall back to mention.name only if it's not a UUID or phone number pattern
+        // For non-bot users, we need a display name
+        // The mention.name field often contains phone/UUID, so look up profile
+        if (!mentionName) {
+          // Try to get display name from profile facets
+          const profileFacetId = `signal-profile-${mention.uuid || mention.number}`;
+          const profileFacet = state.facets.get(profileFacetId);
+          if (profileFacet) {
+            mentionName = profileFacet.attributes?.displayName || profileFacet.content;
+          }
+        }
+
+        // Fall back to mention.name only if it looks like a display name (not UUID/phone)
         if (!mentionName && mention.name) {
           const isUuid = /^[0-9a-f-]{36}$/i.test(mention.name);
           const isPhone = /^\+?\d+$/.test(mention.name);
@@ -255,11 +269,20 @@ export class SignalMessageReceptor extends BaseReceptor {
           }
         }
 
-        // Replace FFFC with @name
-        processedMessage = processedMessage.replace('\uFFFC', `@${mentionName || mention.name || mention.uuid || 'unknown'}`);
+        // Use position-based replacement for accuracy
+        const start = mention.start ?? 0;
+        const length = mention.length ?? 1;
+        const replacement = `@${mentionName || 'user'}`;
+
+        // Only replace if we have valid position and the character at that position is FFFC
+        if (start >= 0 && start < processedMessage.length) {
+          const before = processedMessage.slice(0, start);
+          const after = processedMessage.slice(start + length);
+          processedMessage = before + replacement + after;
+        }
       }
     }
-    // Strip any remaining FFFC characters (shouldn't happen but just in case)
+    // Strip any remaining FFFC characters (edge cases)
     processedMessage = processedMessage.replace(/\uFFFC/g, '').trim();
 
     // Bot messages are NOT stored in history (they're handled by agent facets)
