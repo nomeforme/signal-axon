@@ -100,23 +100,35 @@ export class SignalMessageReceptor extends BaseReceptor {
       }
     }
 
-    // Check if bot was mentioned (check both UUID and phone number)
+    // For group chats with deduplication, we need to check ALL bots for mentions/quotes
+    // The botPhone in the payload is just "first receiver" - not who should respond
+    // For DMs, only the receiving bot matters
+
+    // Helper to check if a specific bot was mentioned
+    const isBotMentioned = (phone: string): boolean => {
+      const uuid = this.config.botUuids.get(phone);
+      return mentions?.some((m: any) => {
+        const uuidMatch = uuid && m.uuid === uuid;
+        const numberMatch = m.number === phone;
+        return uuidMatch || numberMatch;
+      }) || false;
+    };
+
+    // Helper to check if a specific bot was quoted
+    const isBotQuoted = (phone: string): boolean => {
+      if (!quote) return false;
+      const uuid = this.config.botUuids.get(phone);
+      return (uuid && quote.authorUuid === uuid) || quote.author === phone;
+    };
+
+    // For backward compatibility and DMs, check the payload's botPhone
     const botUuid = this.config.botUuids.get(botPhone);
-    console.log(`[SignalMessageReceptor] botPhone: ${botPhone}, botUuid: ${botUuid}`);
-    const botMentioned = mentions?.some((m: any) => {
-      const uuidMatch = botUuid && m.uuid === botUuid;
-      const numberMatch = m.number === botPhone;
-      console.log(`[SignalMessageReceptor]   Checking mention: uuid=${m.uuid} (match: ${uuidMatch}), number=${m.number} (match: ${numberMatch})`);
-      return uuidMatch || numberMatch;
-    }) || false;
-    console.log(`[SignalMessageReceptor] botMentioned: ${botMentioned}`);
-    // Check if message quotes/replies to the bot (need to check both UUID and phone number)
-    const quotedBot = quote && (
-      (botUuid && quote.authorUuid === botUuid) ||
-      quote.author === botPhone
-    );
+    const botMentioned = isBotMentioned(botPhone);
+    const quotedBot = isBotQuoted(botPhone);
+
+    console.log(`[SignalMessageReceptor] botPhone: ${botPhone}, botUuid: ${botUuid}, mentioned: ${botMentioned}, quoted: ${quotedBot}`);
     if (quote) {
-      console.log(`[SignalMessageReceptor] Quote check: authorUuid=${quote.authorUuid}, author=${quote.author}, botUuid=${botUuid}, botPhone=${botPhone}, quotedBot=${quotedBot}`);
+      console.log(`[SignalMessageReceptor] Quote: authorUuid=${quote.authorUuid}, author=${quote.author}`);
     }
 
     // Determine if bot should respond and if message should be stored in context
@@ -254,50 +266,6 @@ export class SignalMessageReceptor extends BaseReceptor {
       }
     }
 
-    // Bot loop prevention counter management (per-bot to avoid race conditions)
-    if (isGroupChat) {
-      const counterFacetId = `bot-interaction-counter-${botPhone}-${streamId}`;
-      const counterFacet = state.facets.get(counterFacetId);
-      const currentCount = (counterFacet?.state as any)?.count || 0;
-
-      if (isBotMessage && shouldRespond) {
-        // Increment counter for bot-to-bot interaction
-        // Remove old counter first if it exists
-        if (counterFacet) {
-          deltas.push({ type: 'removeFacet', id: counterFacetId });
-        }
-        deltas.push({
-          type: 'addFacet',
-          facet: {
-            id: counterFacetId,
-            type: 'bot-interaction-counter',
-            streamId,
-            botPhone,
-            aspects: { ephemeral: true },
-            state: { count: currentCount + 1 }
-          }
-        });
-        console.log(`[BOT LOOP PREVENTION] Incremented counter for ${botPhone} to ${currentCount + 1}`);
-      } else if (!isBotMessage) {
-        // Human message - reset counter for THIS bot
-        if (counterFacet && currentCount > 0) {
-          console.log(`[BOT LOOP PREVENTION] Human message detected. Resetting bot counter for ${botPhone}.`);
-          deltas.push({ type: 'removeFacet', id: counterFacetId });
-          deltas.push({
-            type: 'addFacet',
-            facet: {
-              id: counterFacetId,
-              type: 'bot-interaction-counter',
-              streamId,
-              botPhone,
-              aspects: { ephemeral: true },
-              state: { count: 0 }
-            }
-          });
-        }
-      }
-    }
-
     // Only create message facets if message doesn't already exist (deduplication)
     // But we still need to create agent-activation if THIS bot was mentioned
     if (!messageAlreadyExists && storeInHistory) {
@@ -413,43 +381,134 @@ export class SignalMessageReceptor extends BaseReceptor {
       }
     }
 
-    // Create agent activation if bot should respond
-    if (shouldRespond || !isGroupChat) {
-      // Get target agent name for this bot (matches the agent's config.name)
-      const botName = this.config.botNames.get(botPhone);
+    // Create agent activations
+    // For DMs: activate the receiving bot
+    // For group chats: activate ALL mentioned/quoted bots (with deduplication, one event serves all)
+    if (!isGroupChat) {
+      // DM - activate the receiving bot
+      if (shouldRespond) {
+        const botName = this.config.botNames.get(botPhone);
+        console.log(`[SignalMessageReceptor] Creating agent-activation for DM: botPhone ${botPhone}, targetAgent: ${botName}`);
 
-      console.log(`[SignalMessageReceptor] Creating agent-activation for botPhone ${botPhone}, targetAgent: ${botName}, streamId: ${streamId}, reason: ${botMentioned ? 'mention' : quotedBot ? 'quote' : 'dm'}`);
-
-      deltas.push({
-        type: 'addFacet',
-        facet: {
-          id: `signal-activation-${botPhone}-${timestamp}`,
-          type: 'agent-activation',
-          aspects: {
-            ephemeral: true
-          },
-          state: {
-            targetAgent: botName,
-            streamRef: {
+        deltas.push({
+          type: 'addFacet',
+          facet: {
+            id: `signal-activation-${botPhone}-${timestamp}`,
+            type: 'agent-activation',
+            aspects: { ephemeral: true },
+            state: {
+              targetAgent: botName,
+              streamRef: { streamId, elementId: 'space', elementPath: [] },
               streamId,
-              elementId: 'space',
-              elementPath: []
+              conversationKey,
+              triggeredBy: messageId,
+              botPhone,
+              reason: 'dm'
             },
-            streamId,
-            conversationKey,
-            triggeredBy: messageId,
-            botPhone,
-            reason: botMentioned ? 'mention' : quotedBot ? 'quote' : 'dm'
-          },
-          attributes: {
-            streamId,
-            conversationKey,
-            triggeredBy: messageId,
-            botPhone,
-            reason: botMentioned ? 'mention' : quotedBot ? 'quote' : 'dm'
+            attributes: { streamId, conversationKey, triggeredBy: messageId, botPhone, reason: 'dm' }
+          }
+        });
+      }
+    } else {
+      // Group chat - check ALL bots for mentions/quotes and create activations
+      // With deduplication, only one signal:message event is emitted per group message
+      for (const [targetBotPhone, targetBotName] of this.config.botNames.entries()) {
+        const targetBotUuid = this.config.botUuids.get(targetBotPhone);
+
+        // Skip if this bot sent the message (don't respond to self)
+        if (sourceUuid === targetBotUuid) continue;
+
+        const targetMentioned = isBotMentioned(targetBotPhone);
+        const targetQuoted = isBotQuoted(targetBotPhone);
+        let targetShouldRespond = targetMentioned || targetQuoted;
+
+        // Bot-to-bot loop prevention
+        if (targetShouldRespond && isBotMessage) {
+          const maxBotMentions = this.config.maxBotMentionsPerConversation || 10;
+          const counterFacetId = `bot-interaction-counter-${targetBotPhone}-${streamId}`;
+          const counterFacet = state.facets.get(counterFacetId);
+          const currentCount = (counterFacet?.state as any)?.count || 0;
+
+          if (currentCount >= maxBotMentions) {
+            console.log(`[BOT LOOP PREVENTION] ⚠ Bot ${targetBotPhone} at limit (${currentCount}/${maxBotMentions}), skipping`);
+            targetShouldRespond = false;
+          } else {
+            console.log(`[BOT LOOP PREVENTION] Bot ${targetBotPhone} mentioned by bot (${currentCount}/${maxBotMentions})`);
           }
         }
-      });
+
+        // Random reply for non-mentioned bots (human messages only)
+        if (!targetShouldRespond && !isBotMessage && storeInHistory) {
+          const randomReplyChance = this.config.randomReplyChance || 0;
+          if (randomReplyChance > 0) {
+            const roll = Math.floor(Math.random() * 100) + 1;
+            targetShouldRespond = roll <= (100 / randomReplyChance);
+            if (targetShouldRespond) {
+              console.log(`[SignalMessageReceptor] Random reply triggered for ${targetBotPhone}`);
+            }
+          }
+        }
+
+        if (targetShouldRespond) {
+          const reason = targetMentioned ? 'mention' : targetQuoted ? 'quote' : 'random';
+          console.log(`[SignalMessageReceptor] Creating agent-activation for group: botPhone ${targetBotPhone}, targetAgent: ${targetBotName}, reason: ${reason}`);
+
+          deltas.push({
+            type: 'addFacet',
+            facet: {
+              id: `signal-activation-${targetBotPhone}-${timestamp}`,
+              type: 'agent-activation',
+              aspects: { ephemeral: true },
+              state: {
+                targetAgent: targetBotName,
+                streamRef: { streamId, elementId: 'space', elementPath: [] },
+                streamId,
+                conversationKey,
+                triggeredBy: messageId,
+                botPhone: targetBotPhone,
+                reason
+              },
+              attributes: { streamId, conversationKey, triggeredBy: messageId, botPhone: targetBotPhone, reason }
+            }
+          });
+
+          // Update bot interaction counter for bot-to-bot mentions
+          if (isBotMessage) {
+            const counterFacetId = `bot-interaction-counter-${targetBotPhone}-${streamId}`;
+            const counterFacet = state.facets.get(counterFacetId);
+            const currentCount = (counterFacet?.state as any)?.count || 0;
+
+            if (counterFacet) {
+              deltas.push({ type: 'removeFacet', id: counterFacetId });
+            }
+            deltas.push({
+              type: 'addFacet',
+              facet: {
+                id: counterFacetId,
+                type: 'bot-interaction-counter',
+                streamId,
+                botPhone: targetBotPhone,
+                aspects: { ephemeral: true },
+                state: { count: currentCount + 1 }
+              }
+            });
+          }
+        }
+      }
+
+      // Reset bot counters for human messages
+      if (!isBotMessage) {
+        for (const [targetBotPhone] of this.config.botNames.entries()) {
+          const counterFacetId = `bot-interaction-counter-${targetBotPhone}-${streamId}`;
+          const counterFacet = state.facets.get(counterFacetId);
+          const currentCount = (counterFacet?.state as any)?.count || 0;
+
+          if (counterFacet && currentCount > 0) {
+            console.log(`[BOT LOOP PREVENTION] Human message. Resetting counter for ${targetBotPhone}.`);
+            deltas.push({ type: 'removeFacet', id: counterFacetId });
+          }
+        }
+      }
     }
 
     console.log(`[SignalMessageReceptor] Returning ${deltas.length} deltas`);

@@ -8,6 +8,7 @@
 import WebSocket from 'ws';
 import { BaseAfferent } from 'connectome-ts';
 import type { AfferentContext } from 'connectome-ts';
+import { messageDeduplicator } from './message-deduplicator.js';
 
 export interface SignalAfferentConfig {
   botPhone: string;
@@ -253,6 +254,14 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
           : `signal-stream-${botPhone}-${conversationKey}`;
         const streamType = 'signal';
 
+        // Deduplicate group messages - only first bot to receive emits an event
+        // This reduces frame creation from N bots to 1 per group message
+        const messageId = `${source}-${timestamp}`;
+        if (!messageDeduplicator.shouldEmit(messageId, botPhone, isGroupChat)) {
+          console.log(`[SignalAfferent ${botPhone}] Skipping duplicate group message ${messageId.substring(0, 50)}...`);
+          return;
+        }
+
         this.emit({
           topic: 'signal:message',
           source: { elementId: this.element?.id || 'signal-afferent', elementPath: [] },
@@ -273,37 +282,11 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
             streamType
           }
         });
-      } else if (receiptMessage.when) {
-        // Receipt (read/delivery confirmation)
-        this.emit({
-          topic: 'signal:receipt',
-          source: { elementId: this.element?.id || 'signal-afferent', elementPath: [] },
-          timestamp,
-          payload: {
-            botPhone,
-            source,
-            sourceUuid,
-            when: receiptMessage.when,
-            isDelivery: receiptMessage.isDelivery,
-            isRead: receiptMessage.isRead,
-            timestamps: receiptMessage.timestamps
-          }
-        });
-      } else if (typingMessage) {
-        // Typing indicator
-        this.emit({
-          topic: 'signal:typing',
-          source: { elementId: this.element?.id || 'signal-afferent', elementPath: [] },
-          timestamp,
-          payload: {
-            botPhone,
-            source,
-            sourceUuid,
-            groupId: typingMessage.groupId,
-            action: typingMessage.action // 'STARTED' or 'STOPPED'
-          }
-        });
       }
+      // Skip receipts and typing indicators - they create frames but don't
+      // contribute to conversation context, causing unnecessary overhead.
+      // Receipt: receiptMessage.when (delivery/read confirmations)
+      // Typing: typingMessage (typing indicators)
     } catch (error) {
       if (error instanceof SyntaxError) {
         console.error(`[SignalAfferent ${botPhone}] Failed to parse JSON:`, data);
