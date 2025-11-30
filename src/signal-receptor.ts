@@ -273,7 +273,7 @@ export class SignalMessageReceptor extends BaseReceptor {
         shouldRespond = false;
       } else if (botMentioned) {
         // Bot-to-bot mention - check loop prevention limit
-        const maxBotMentions = this.config.maxBotMentionsPerConversation || 10;
+        const maxBotMentions = this.config.maxBotMentionsPerConversation ?? 10;
 
         // Count consecutive bot-to-bot interactions since last human message
         // Counter is PER-BOT per stream to avoid race conditions
@@ -524,7 +524,7 @@ export class SignalMessageReceptor extends BaseReceptor {
             console.log(`[BOT LOOP PREVENTION] Skipping bot-to-bot check for re-processed message`);
             targetShouldRespond = false;
           } else {
-            const maxBotMentions = this.config.maxBotMentionsPerConversation || 10;
+            const maxBotMentions = this.config.maxBotMentionsPerConversation ?? 10;
             const counterFacetId = `bot-interaction-counter-${targetBotPhone}-${streamId}`;
             const counterFacet = state.facets.get(counterFacetId);
             const currentCount = (counterFacet?.state as any)?.count || 0;
