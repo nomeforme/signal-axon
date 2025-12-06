@@ -206,7 +206,8 @@ export class SignalMessageReceptor extends BaseReceptor {
               currentConfig: {
                 randomReplyChance: this.config.randomReplyChance || 0,
                 maxBotMentionsPerConversation: this.config.maxBotMentionsPerConversation ?? 10,
-                maxConversationFrames: this.config.maxConversationFrames ?? 8000
+                maxConversationFrames: this.config.maxConversationFrames!,
+                currentFrameCount: state.frameHistory.length
               }
             }
           }

@@ -480,15 +480,17 @@ export class SignalCommandEffector extends BaseEffector {
       case '!mf':
         if (!args) {
           // Show current setting
-          const maxFrames = currentConfig.maxConversationFrames ?? 8000;
-          response = `Max conversation frames: ${maxFrames} (~${Math.floor(maxFrames / 2)} messages)`;
+          const maxFrames = currentConfig.maxConversationFrames;
+          const totalFrames = currentConfig.currentFrameCount ?? 0;
+          const displayFrames = Math.min(totalFrames, maxFrames);
+          response = `Frames: ${displayFrames} / ${maxFrames}`;
         } else {
           const newMaxFrames = parseInt(args);
           if (isNaN(newMaxFrames) || newMaxFrames < 100) {
             response = '❌ Invalid value. Use a number >= 100';
           } else {
             configUpdates = { maxConversationFrames: newMaxFrames };
-            response = `✅ Max conversation frames set to ${newMaxFrames} (~${Math.floor(newMaxFrames / 2)} messages)`;
+            response = `✅ Max frames set to ${newMaxFrames}`;
           }
         }
         break;
