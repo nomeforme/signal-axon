@@ -417,7 +417,7 @@ export class SignalCommandEffector extends BaseEffector {
   • 0 = disabled, 1+ = limit
   • No argument shows current setting
 
-!mf [number] - Max conversation frames
+!mcf [number] - Max context frames
   • Rolling window for context
   • No argument shows current setting
 
@@ -480,7 +480,7 @@ export class SignalCommandEffector extends BaseEffector {
         }
         break;
 
-      case '!mf':
+      case '!mcf':
         if (!args) {
           // Show current setting
           const maxFrames = currentConfig.maxConversationFrames;

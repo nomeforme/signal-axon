@@ -185,7 +185,7 @@ export class SignalMessageReceptor extends BaseReceptor {
       const { command, args } = parsed;
 
       // Recognized commands that bypass agent activation
-      const COMMANDS = ['!rr', '!bb', '!mf', '!mmf', '!help'];
+      const COMMANDS = ['!rr', '!bb', '!mcf', '!mmf', '!help'];
 
       // Handle recognized commands
       if (COMMANDS.includes(command)) {
