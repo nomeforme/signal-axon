@@ -21,6 +21,8 @@ export interface SignalReceptorConfig {
   maxBotMentionsPerConversation?: number;
   // Maximum conversation frames to include in context (rolling window)
   maxConversationFrames?: number;
+  // Maximum frames to keep in memory (rest are on disk)
+  maxMemoryFrames?: number;
 }
 
 /**
@@ -182,8 +184,11 @@ export class SignalMessageReceptor extends BaseReceptor {
     if (parsed && mentionedBotPhone && !isBotMessage) {
       const { command, args } = parsed;
 
+      // Recognized commands that bypass agent activation
+      const COMMANDS = ['!rr', '!bb', '!mf', '!mmf', '!help'];
+
       // Handle recognized commands
-      if (command === '!rr' || command === '!bb' || command === '!mf' || command === '!help') {
+      if (COMMANDS.includes(command)) {
         // With shared VEIL state and deduplication, only one bot emits the event
         // Create the command facet for the mentioned bot regardless of which bot emitted
         console.log(`[SignalMessageReceptor] Command detected: ${command} ${args} (mentioned bot: ${mentionedBotPhone})`);
@@ -207,6 +212,7 @@ export class SignalMessageReceptor extends BaseReceptor {
                 randomReplyChance: this.config.randomReplyChance || 0,
                 maxBotMentionsPerConversation: this.config.maxBotMentionsPerConversation ?? 10,
                 maxConversationFrames: this.config.maxConversationFrames!,
+                maxMemoryFrames: this.config.maxMemoryFrames!,
                 currentFrameCount: state.frameHistory.length
               }
             }

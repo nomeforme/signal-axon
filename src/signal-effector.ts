@@ -338,7 +338,7 @@ export class SignalSpeechEffector extends BaseEffector {
 /**
  * Callback type for updating config values
  */
-export type ConfigUpdateCallback = (updates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number; maxConversationFrames?: number }) => void;
+export type ConfigUpdateCallback = (updates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number; maxConversationFrames?: number; maxMemoryFrames?: number }) => void;
 
 /**
  * SignalCommandEffector handles command facets (!rr, !bb, !help)
@@ -400,7 +400,7 @@ export class SignalCommandEffector extends BaseEffector {
     console.log(`[SignalCommandEffector] Handling command: ${command} ${args}`);
 
     let response = '';
-    let configUpdates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number; maxConversationFrames?: number } | null = null;
+    let configUpdates: { randomReplyChance?: number; maxBotMentionsPerConversation?: number; maxConversationFrames?: number; maxMemoryFrames?: number } | null = null;
 
     switch (command) {
       case '!help':
@@ -418,8 +418,11 @@ export class SignalCommandEffector extends BaseEffector {
   • No argument shows current setting
 
 !mf [number] - Max conversation frames
-  • Rolling window for context (default: 8000)
-  • ~2 frames per message, 8000 ≈ 4000 messages
+  • Rolling window for context
+  • No argument shows current setting
+
+!mmf [number] - Max memory frames
+  • Frames kept in RAM (rest on disk)
   • No argument shows current setting
 
 !help - Show this message`;
@@ -491,6 +494,24 @@ export class SignalCommandEffector extends BaseEffector {
           } else {
             configUpdates = { maxConversationFrames: newMaxFrames };
             response = `✅ Max frames set to ${newMaxFrames}`;
+          }
+        }
+        break;
+
+      case '!mmf':
+        if (!args) {
+          // Show current setting
+          const maxMemFrames = currentConfig.maxMemoryFrames;
+          const totalFrames = currentConfig.currentFrameCount ?? 0;
+          const displayFrames = Math.min(totalFrames, maxMemFrames);
+          response = `Memory frames: ${displayFrames} / ${maxMemFrames}`;
+        } else {
+          const newMaxMemFrames = parseInt(args);
+          if (isNaN(newMaxMemFrames) || newMaxMemFrames < 100) {
+            response = '❌ Invalid value. Use a number >= 100';
+          } else {
+            configUpdates = { maxMemoryFrames: newMaxMemFrames };
+            response = `✅ Max memory frames set to ${newMaxMemFrames}`;
           }
         }
         break;
