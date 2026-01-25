@@ -5,8 +5,8 @@
  */
 
 import axios from 'axios';
-import { BaseEffector } from 'connectome-ts';
-import type { EffectorResult, FacetDelta, ReadonlyVEILState } from 'connectome-ts';
+import { Component, priorityConstraint, ComponentPriority } from 'connectome-ts';
+import type { FacetDelta, ReadonlyVEILState, ExecutionContext, VEILDelta } from 'connectome-ts';
 
 export interface SignalEffectorConfig {
   apiUrl: string; // e.g., 'http://localhost:8081'
@@ -35,7 +35,9 @@ interface SignalMention {
 /**
  * SignalSpeechEffector sends speech facets to Signal
  */
-export class SignalSpeechEffector extends BaseEffector {
+export class SignalSpeechEffector extends Component {
+  constraints = [priorityConstraint(ComponentPriority.EFFECTOR)];
+
   private config: SignalEffectorConfig;
   private maxMessageLength: number;
   private groupIdCache = new Map<string, string>(); // Cache internal_id -> external id mappings
@@ -48,30 +50,34 @@ export class SignalSpeechEffector extends BaseEffector {
     this.nameToPhone = createNameToPhoneMap(config.botNames);
   }
 
-  async process(changes: FacetDelta[], state: ReadonlyVEILState): Promise<EffectorResult> {
-    const events = [];
+  execute(context: ExecutionContext): void {
+    const { state, frame } = context;
+    if (!frame?.deltas) return;
 
-    for (const change of changes) {
-      if (change.type === 'added' && change.facet.type === 'speech') {
-        try {
-          await this.sendSpeech(change.facet, state);
-        } catch (error) {
-          console.error('[SignalSpeechEffector] Error sending speech:', error);
-          // Emit error event
-          events.push({
-            topic: 'signal:send-error',
-            source: { elementId: this.element?.id || 'signal-effector', elementPath: [] },
-            timestamp: Date.now(),
-            payload: {
-              facetId: change.facet.id,
-              error: error instanceof Error ? error.message : String(error)
-            }
-          });
-        }
+    for (const delta of frame.deltas) {
+      if (delta.type === 'addFacet' && delta.facet.type === 'speech') {
+        // Fire-and-forget async
+        this.sendSpeechAsync(delta.facet, state);
       }
     }
+  }
 
-    return { events };
+  private sendSpeechAsync(facet: any, state: ReadonlyVEILState): void {
+    (async () => {
+      try {
+        await this.sendSpeech(facet, state);
+      } catch (error) {
+        console.error('[SignalSpeechEffector] Error sending speech:', error);
+        // Emit error event
+        this.emit({
+          topic: 'signal:send-error',
+          payload: {
+            facetId: facet.id,
+            error: error instanceof Error ? error.message : String(error)
+          }
+        });
+      }
+    })();
   }
 
   /**
@@ -112,9 +118,6 @@ export class SignalSpeechEffector extends BaseEffector {
   private async sendSpeech(facet: any, state: ReadonlyVEILState): Promise<void> {
     let content = facet.content;
     if (!content) return;
-
-    console.log(`[SignalSpeechEffector] Original content (first 100 chars): "${content.substring(0, 100)}"`);
-    console.log(`[SignalSpeechEffector] Facet agentName: ${facet.agentName}, agentId: ${facet.agentId}`);
 
     // Strip speaker prefix (e.g., "haiku-4-5: " or "sonnet-4-5: ")
     // The prefix is added by SpeakerPrefixReceptor for internal identification
@@ -344,7 +347,9 @@ export type ConfigUpdateCallback = (updates: { randomReplyChance?: number; maxBo
  * SignalCommandEffector handles command facets (!rr, !bb, !help)
  * and sends responses via Signal
  */
-export class SignalCommandEffector extends BaseEffector {
+export class SignalCommandEffector extends Component {
+  constraints = [priorityConstraint(ComponentPriority.EFFECTOR)];
+
   private config: SignalEffectorConfig;
   private onConfigUpdate?: ConfigUpdateCallback;
   private groupIdCache = new Map<string, string>(); // Cache internal_id -> external id mappings
@@ -380,18 +385,26 @@ export class SignalCommandEffector extends BaseEffector {
     }
   }
 
-  async process(changes: FacetDelta[], state: ReadonlyVEILState): Promise<EffectorResult> {
-    for (const change of changes) {
-      if (change.type === 'added' && change.facet.type === 'signal-command') {
-        try {
-          await this.handleCommand(change.facet, state);
-        } catch (error) {
-          console.error('[SignalCommandEffector] Error handling command:', error);
-        }
+  execute(context: ExecutionContext): void {
+    const { state, frame } = context;
+    if (!frame?.deltas) return;
+
+    for (const delta of frame.deltas) {
+      if (delta.type === 'addFacet' && delta.facet.type === 'signal-command') {
+        // Fire-and-forget async
+        this.handleCommandAsync(delta.facet, state);
       }
     }
+  }
 
-    return { events: [] };
+  private handleCommandAsync(facet: any, state: ReadonlyVEILState): void {
+    (async () => {
+      try {
+        await this.handleCommand(facet, state);
+      } catch (error) {
+        console.error('[SignalCommandEffector] Error handling command:', error);
+      }
+    })();
   }
 
   private async handleCommand(facet: any, state: ReadonlyVEILState): Promise<void> {

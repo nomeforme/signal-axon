@@ -5,8 +5,8 @@
  * if a mentioned bot didn't receive it.
  */
 
-import { BaseReceptor } from 'connectome-ts';
-import type { SpaceEvent, VEILDelta, ReadonlyVEILState } from 'connectome-ts';
+import { Component, priorityConstraint, ComponentPriority } from 'connectome-ts';
+import type { SpaceEvent, VEILDelta, ReadonlyVEILState, ExecutionContext } from 'connectome-ts';
 
 export interface MessageConsistencyConfig {
   // Map of bot phone numbers to their names
@@ -28,7 +28,8 @@ interface MessageTracker {
   isBotMessage: boolean; // Whether this message is from another bot
 }
 
-export class MessageConsistencyReceptor extends BaseReceptor {
+export class MessageConsistencyReceptor extends Component {
+  constraints = [priorityConstraint(ComponentPriority.RECEPTOR)];
   topics = ['signal:message'];
 
   private config: MessageConsistencyConfig;
@@ -40,13 +41,16 @@ export class MessageConsistencyReceptor extends BaseReceptor {
     this.config = config;
   }
 
-  transform(event: SpaceEvent, state: ReadonlyVEILState): VEILDelta[] {
+  execute(context: ExecutionContext): void {
+    const { event } = context;
+    if (event.topic !== 'signal:message') return;
+
     const payload = event.payload as any;
     const { source, sourceUuid, timestamp, botPhone, mentions, quote, groupId } = payload;
 
     // Only check consistency for group messages
     if (!groupId) {
-      return [];
+      return;
     }
 
     // Check if the message is from a bot
@@ -73,8 +77,7 @@ export class MessageConsistencyReceptor extends BaseReceptor {
 
     // Record that this bot received the message
     tracker.receivedBy.add(botPhone);
-
-    return [];
+    // No deltas to add - this receptor only tracks state
   }
 
   private checkConsistency(messageId: string): void {

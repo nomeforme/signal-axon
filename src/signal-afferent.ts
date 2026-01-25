@@ -6,9 +6,14 @@
  */
 
 import WebSocket from 'ws';
+import sharp from 'sharp';
 import { BaseAfferent } from 'connectome-ts';
 import type { AfferentContext } from 'connectome-ts';
 import { messageDeduplicator } from './message-deduplicator.js';
+
+// Image compression settings
+const IMAGE_MAX_DIMENSION = 1024;  // Max width or height
+const IMAGE_JPEG_QUALITY = 80;    // JPEG quality (1-100)
 
 export interface SignalAfferentConfig {
   botPhone: string;
@@ -116,7 +121,7 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
       // Emit error event
       this.emit({
         topic: 'afferent:error',
-        source: { elementId: this.element?.id || 'signal-afferent', elementPath: [] },
+        source: this.getRef(),
         timestamp: Date.now(),
         payload: {
           afferentId: this.context.afferentId,
@@ -161,12 +166,74 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
         return null;
       }
 
-      const buffer = await response.arrayBuffer();
-      const base64 = Buffer.from(buffer).toString('base64');
-      console.log(`[SignalAfferent ${botPhone}] Downloaded attachment: ${base64.length} bytes (base64)`);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const originalSize = buffer.length;
+
+      // Compress image: resize to max dimension and convert to JPEG
+      const compressed = await this.compressImage(buffer);
+      if (compressed) {
+        const base64 = compressed.toString('base64');
+        console.log(`[SignalAfferent ${botPhone}] Downloaded and compressed attachment: ${originalSize} -> ${compressed.length} bytes (${Math.round(compressed.length / originalSize * 100)}%)`);
+        return base64;
+      }
+
+      // Fallback to original if compression fails
+      const base64 = buffer.toString('base64');
+      console.log(`[SignalAfferent ${botPhone}] Downloaded attachment (uncompressed): ${base64.length} bytes (base64)`);
       return base64;
     } catch (error) {
       console.error(`[SignalAfferent ${botPhone}] Error downloading attachment:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Compress an image: resize to max dimension and convert to JPEG
+   * Returns null if compression fails (e.g., unsupported format)
+   */
+  private async compressImage(buffer: Buffer): Promise<Buffer | null> {
+    const { botPhone } = this.context.config;
+
+    try {
+      // Get image metadata
+      const metadata = await sharp(buffer).metadata();
+      const { width, height, format } = metadata;
+
+      if (!width || !height) {
+        console.log(`[SignalAfferent ${botPhone}] Could not get image dimensions, skipping compression`);
+        return null;
+      }
+
+      // Check if resizing is needed
+      const maxDim = Math.max(width, height);
+      const needsResize = maxDim > IMAGE_MAX_DIMENSION;
+
+      // Skip compression for small images that are already JPEG
+      if (!needsResize && format === 'jpeg') {
+        console.log(`[SignalAfferent ${botPhone}] Image already optimized (${width}x${height} ${format})`);
+        return buffer;
+      }
+
+      // Build sharp pipeline
+      let pipeline = sharp(buffer);
+
+      // Resize if needed (maintain aspect ratio)
+      if (needsResize) {
+        pipeline = pipeline.resize(IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION, {
+          fit: 'inside',
+          withoutEnlargement: true
+        });
+      }
+
+      // Convert to JPEG
+      const compressed = await pipeline
+        .jpeg({ quality: IMAGE_JPEG_QUALITY })
+        .toBuffer();
+
+      console.log(`[SignalAfferent ${botPhone}] Compressed image: ${width}x${height} ${format} -> JPEG (${needsResize ? 'resized' : 'same size'})`);
+      return compressed;
+    } catch (error) {
+      console.error(`[SignalAfferent ${botPhone}] Image compression failed:`, error);
       return null;
     }
   }
@@ -210,12 +277,12 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
           const isImage = contentType.startsWith('image/');
 
           if (isImage && attachment.id) {
-            // Download image and convert to base64
+            // Download image, compress, and convert to base64
             const base64Data = await this.downloadAttachment(attachment.id);
             if (base64Data) {
               processedAttachments.push({
                 id: attachment.id,
-                contentType: attachment.contentType,
+                contentType: 'image/jpeg',  // Always JPEG after compression
                 filename: attachment.filename,
                 size: attachment.size,
                 data: base64Data
@@ -264,7 +331,7 @@ export class SignalAfferent extends BaseAfferent<SignalAfferentConfig> {
 
         this.emit({
           topic: 'signal:message',
-          source: { elementId: this.element?.id || 'signal-afferent', elementPath: [] },
+          source: this.getRef(),
           timestamp,
           payload: {
             botPhone,

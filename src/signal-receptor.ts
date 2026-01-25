@@ -5,8 +5,8 @@
  * facets representing conversations, messages, and agent activations.
  */
 
-import { BaseReceptor } from 'connectome-ts';
-import type { SpaceEvent, VEILDelta, ReadonlyVEILState } from 'connectome-ts';
+import { Component, priorityConstraint, ComponentPriority } from 'connectome-ts';
+import type { SpaceEvent, VEILDelta, ReadonlyVEILState, ExecutionContext } from 'connectome-ts';
 
 export interface SignalReceptorConfig {
   // Map of bot phone numbers to their UUIDs
@@ -28,7 +28,8 @@ export interface SignalReceptorConfig {
 /**
  * SignalMessageReceptor processes signal:message events and creates facets
  */
-export class SignalMessageReceptor extends BaseReceptor {
+export class SignalMessageReceptor extends Component {
+  constraints = [priorityConstraint(ComponentPriority.RECEPTOR)];
   topics = ['signal:message'];
 
   private config: SignalReceptorConfig;
@@ -74,7 +75,10 @@ export class SignalMessageReceptor extends BaseReceptor {
     return { command, args };
   }
 
-  transform(event: SpaceEvent, state: ReadonlyVEILState): VEILDelta[] {
+  execute(context: ExecutionContext): void {
+    const { event, state } = context;
+    if (event.topic !== 'signal:message') return;
+
     const payload = event.payload as any;
     const {
       botPhone,
@@ -99,6 +103,7 @@ export class SignalMessageReceptor extends BaseReceptor {
       console.log(`[SignalMessageReceptor] Quote detected:`, JSON.stringify(quote));
     }
 
+    // Track deltas locally, then add them via addOperation
     const deltas: VEILDelta[] = [];
 
     // Check if this message is from a bot
@@ -221,7 +226,10 @@ export class SignalMessageReceptor extends BaseReceptor {
 
         // ALL bots return early for command messages - no agent activations
         // Don't store command messages in history
-        return deltas;
+        for (const delta of deltas) {
+          this.addOperation(delta);
+        }
+        return;
       }
     }
 
@@ -350,7 +358,7 @@ export class SignalMessageReceptor extends BaseReceptor {
         // Opt-out: Store ALL messages UNLESS prefixed with "."
         if (message.startsWith('.')) {
           // User explicitly opted out of this message - don't store or respond
-          return [];
+          return;
         }
         storeInHistory = true;
       }
@@ -650,32 +658,35 @@ export class SignalMessageReceptor extends BaseReceptor {
       }
     }
 
-    console.log(`[SignalMessageReceptor] Returning ${deltas.length} deltas`);
+    console.log(`[SignalMessageReceptor] Adding ${deltas.length} deltas`);
     for (const delta of deltas) {
       if (delta.type === 'addFacet') {
         console.log(`  - ${delta.type}: ${delta.facet.type} (id: ${delta.facet.id})`);
       } else {
         console.log(`  - ${delta.type}`);
       }
+      this.addOperation(delta);
     }
-
-    return deltas;
   }
 }
 
 /**
  * SignalReceiptReceptor processes read receipts
  */
-export class SignalReceiptReceptor extends BaseReceptor {
+export class SignalReceiptReceptor extends Component {
+  constraints = [priorityConstraint(ComponentPriority.RECEPTOR)];
   topics = ['signal:receipt'];
 
-  transform(event: SpaceEvent, state: ReadonlyVEILState): VEILDelta[] {
+  execute(context: ExecutionContext): void {
+    const { event } = context;
+    if (event.topic !== 'signal:receipt') return;
+
     const payload = event.payload as any;
     const { botPhone, source, isRead, isDelivery, timestamps } = payload;
 
     // Create ephemeral receipt facet
     // This could be used by transforms to update message state
-    return [{
+    this.addOperation({
       type: 'addFacet',
       facet: {
         id: `signal-receipt-${source}-${Date.now()}`,
@@ -691,24 +702,28 @@ export class SignalReceiptReceptor extends BaseReceptor {
           timestamps
         }
       }
-    }];
+    });
   }
 }
 
 /**
  * SignalTypingReceptor processes typing indicators
  */
-export class SignalTypingReceptor extends BaseReceptor {
+export class SignalTypingReceptor extends Component {
+  constraints = [priorityConstraint(ComponentPriority.RECEPTOR)];
   topics = ['signal:typing'];
 
-  transform(event: SpaceEvent, state: ReadonlyVEILState): VEILDelta[] {
+  execute(context: ExecutionContext): void {
+    const { event } = context;
+    if (event.topic !== 'signal:typing') return;
+
     const payload = event.payload as any;
     const { botPhone, source, groupId, action } = payload;
 
     const conversationKey = groupId || source;
 
     // Create ephemeral typing indicator facet
-    return [{
+    this.addOperation({
       type: 'addFacet',
       facet: {
         id: `signal-typing-${conversationKey}-${source}`,
@@ -723,6 +738,6 @@ export class SignalTypingReceptor extends BaseReceptor {
           action // 'STARTED' or 'STOPPED'
         }
       }
-    }];
+    });
   }
 }
