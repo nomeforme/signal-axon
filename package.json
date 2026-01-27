@@ -21,9 +21,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "ws": "^8.14.2",
     "axios": "^1.6.0",
-    "connectome-ts": "file:../connectome-ts"
+    "connectome-ts": "*",
+    "sharp": "^0.34.5",
+    "ws": "^8.14.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
