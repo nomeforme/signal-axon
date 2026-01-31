@@ -179,10 +179,10 @@ export class FocusedContextTransform {
             content: msg.content || ''
           };
 
-          // Include attachments if present
-          if (msg.attachments && Array.isArray(msg.attachments) && msg.attachments.length > 0) {
+          // Include attachments if present (server returns them in metadata.attachments)
+          if (msg.metadata?.attachments && Array.isArray(msg.metadata.attachments) && msg.metadata.attachments.length > 0) {
             message.metadata = {
-              attachments: msg.attachments
+              attachments: msg.metadata.attachments
             };
           }
 
@@ -200,7 +200,13 @@ export class FocusedContextTransform {
   private buildSystemPrompt(): string {
     const identityPrompt = `You are <${this.botName}> in Signal messenger.
 
-To mention users, use @username syntax. The system will convert usernames to Signal mention format automatically.`;
+To mention users, use @username syntax. The system will convert usernames to Signal mention format automatically.
+
+Signal supports these text formatting options:
+- *bold* for bold
+- _italic_ for italic
+- ~strikethrough~ for strikethrough
+- \`monospace\` for monospace`;
 
     if (this.systemPrompt && this.systemPrompt !== 'Standard') {
       return `${this.systemPrompt}\n\n${identityPrompt}`;
@@ -249,16 +255,22 @@ To mention users, use @username syntax. The system will convert usernames to Sig
   }
 
   /**
-   * Log conversation data before sending to LLM
+   * Log conversation data before sending to LLM (last 10 messages only)
    */
   private logConversationData(messages: ContextMessage[], streamId: string): void {
     console.log(`\n╔══════════════════════════════════════════════════════════════════════════════`);
     console.log(`║ [FocusedContextTransform:${this.botName}] CONVERSATION DATA FOR LLM`);
     console.log(`║ Stream: ${streamId}`);
-    console.log(`║ Total messages: ${messages.length}`);
+    console.log(`║ Total messages: ${messages.length} (showing last 10)`);
     console.log(`╠══════════════════════════════════════════════════════════════════════════════`);
 
-    for (let i = 0; i < messages.length; i++) {
+    // Show only the last 10 messages
+    const startIndex = Math.max(0, messages.length - 10);
+    if (startIndex > 0) {
+      console.log(`║ ... (${startIndex} earlier messages omitted)`);
+    }
+
+    for (let i = startIndex; i < messages.length; i++) {
       const msg = messages[i];
       const roleLabel = msg.role.toUpperCase().padEnd(9);
       const contentPreview = msg.content.length > 200
@@ -270,9 +282,12 @@ To mention users, use @username syntax. The system will convert usernames to Sig
 
       console.log(`║ [${i + 1}] ${roleLabel}: ${displayContent}`);
 
-      // Log attachment info if present
+      // Log attachment info if present (without raw base64 data)
       if (msg.metadata?.attachments && msg.metadata.attachments.length > 0) {
-        console.log(`║     └─ Attachments: ${msg.metadata.attachments.length} file(s)`);
+        for (const att of msg.metadata.attachments as any[]) {
+          const dataSize = att.data ? `${Math.round(att.data.length / 1024)}KB base64` : 'no data';
+          console.log(`║     └─ 📎 ${att.filename || att.name || att.id || 'attachment'} (${att.contentType}, ${dataSize})`);
+        }
       }
     }
 

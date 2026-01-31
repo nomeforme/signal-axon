@@ -231,6 +231,7 @@ async function main(): Promise<void> {
     // 8. SignalWebSocketReceptor - handles WebSocket connection to Signal CLI
     const wsReceptor = new SignalWebSocketReceptor({
       wsUrl,
+      httpUrl: apiUrl,  // HTTP base URL for downloading attachments
       botPhone,
       botUuid: botPhoneToUuid.get(botPhone),  // This bot's UUID for mention detection
       botUuids: botPhoneToUuid,

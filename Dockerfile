@@ -17,11 +17,16 @@ WORKDIR /workspace
 
 # Copy all necessary packages (build context is parent directory)
 COPY connectome-axon-interfaces ./connectome-axon-interfaces
+COPY axon-server ./axon-server
 COPY connectome-grpc ./connectome-grpc
 COPY signal-axon ./signal-axon
 
 # Build connectome-axon-interfaces
 WORKDIR /workspace/connectome-axon-interfaces
+RUN npm install && npm run build
+
+# Build axon-server
+WORKDIR /workspace/axon-server
 RUN npm install && npm run build
 
 # Build connectome-grpc

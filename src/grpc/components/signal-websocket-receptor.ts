@@ -4,6 +4,7 @@
  * Manages the WebSocket connection to Signal CLI's receive endpoint:
  * - Connects and maintains connection with auto-reconnect
  * - Parses incoming envelopes (messages, receipts, typing)
+ * - Downloads and compresses image attachments
  * - Emits parsed events to registered handlers
  *
  * This is the gRPC client-side equivalent - it handles the raw Signal CLI
@@ -11,10 +12,16 @@
  */
 
 import WebSocket from 'ws';
+import sharp from 'sharp';
 import type { SignalMessageEvent, SignalAttachment, SignalMention, SignalQuote } from '../types.js';
+
+// Image compression settings
+const IMAGE_MAX_DIMENSION = 1024;  // Max width or height
+const IMAGE_JPEG_QUALITY = 80;    // JPEG quality (1-100)
 
 export interface SignalWebSocketReceptorConfig {
   wsUrl: string;
+  httpUrl: string;  // HTTP base URL for downloading attachments
   botPhone: string;
   botUuid?: string;  // THIS bot's UUID (for checking if mentioned)
   botUuids?: Map<string, string>;  // All bot UUIDs for bot message detection
@@ -50,6 +57,7 @@ export interface SignalTypingEvent {
 export class SignalWebSocketReceptor {
   private ws: WebSocket | null = null;
   private wsUrl: string;
+  private httpUrl: string;
   private botPhone: string;
   private botUuid: string | undefined;
   private botUuids: Map<string, string>;
@@ -64,6 +72,7 @@ export class SignalWebSocketReceptor {
 
   constructor(config: SignalWebSocketReceptorConfig) {
     this.wsUrl = config.wsUrl;
+    this.httpUrl = config.httpUrl;
     this.botPhone = config.botPhone;
     this.botUuid = config.botUuid;
     this.botUuids = config.botUuids || new Map();
@@ -182,6 +191,9 @@ export class SignalWebSocketReceptor {
       console.log(`[SignalWebSocketReceptor:${this.botPhone}] Forwarding bot message from ${sourceUuid} to message receptor`);
     }
 
+    // Process attachments (downloads images and converts to base64)
+    const attachments = await this.parseAttachments(dataMessage.attachments);
+
     // Build message event
     const event: SignalMessageEvent = {
       content: dataMessage.message || '',
@@ -192,7 +204,7 @@ export class SignalWebSocketReceptor {
       groupName: dataMessage.groupInfo?.groupName,
       botPhone: this.botPhone,
       timestamp: dataMessage.timestamp,
-      attachments: this.parseAttachments(dataMessage.attachments),
+      attachments,
       mentions: this.parseMentions(mentions),
       quotedMessage: this.parseQuote(quote)
     };
@@ -263,17 +275,139 @@ export class SignalWebSocketReceptor {
   }
 
   /**
-   * Parse attachments from Signal format
+   * Parse and process attachments from Signal format
+   * Downloads images and converts to base64
    */
-  private parseAttachments(attachments: any[] | undefined): SignalAttachment[] | undefined {
+  private async parseAttachments(attachments: any[] | undefined): Promise<SignalAttachment[] | undefined> {
     if (!attachments || attachments.length === 0) return undefined;
 
-    return attachments.map(att => ({
-      id: att.id,
-      contentType: att.contentType,
-      filename: att.filename,
-      size: att.size
-    }));
+    const processedAttachments: SignalAttachment[] = [];
+
+    for (const att of attachments) {
+      const contentType = att.contentType || '';
+      const isImage = contentType.startsWith('image/');
+
+      if (isImage && att.id) {
+        // Download image, compress, and convert to base64
+        const base64Data = await this.downloadAttachment(att.id);
+        if (base64Data) {
+          processedAttachments.push({
+            id: att.id,
+            contentType: 'image/jpeg',  // Always JPEG after compression
+            filename: att.filename,
+            size: att.size,
+            data: base64Data
+          });
+        } else {
+          // Failed to download, include metadata only
+          processedAttachments.push({
+            id: att.id,
+            contentType: att.contentType,
+            filename: att.filename,
+            size: att.size
+          });
+        }
+      } else {
+        // Non-image attachment, include metadata only
+        processedAttachments.push({
+          id: att.id,
+          contentType: att.contentType,
+          filename: att.filename,
+          size: att.size
+        });
+      }
+    }
+
+    return processedAttachments.length > 0 ? processedAttachments : undefined;
+  }
+
+  /**
+   * Download an attachment from Signal CLI HTTP API and return as base64
+   */
+  private async downloadAttachment(attachmentId: string): Promise<string | null> {
+    if (!this.httpUrl) {
+      console.warn(`[SignalWebSocketReceptor:${this.botPhone}] No httpUrl configured, cannot download attachment`);
+      return null;
+    }
+
+    try {
+      const url = `${this.httpUrl}/v1/attachments/${attachmentId}`;
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Downloading attachment from ${url}`);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`[SignalWebSocketReceptor:${this.botPhone}] Failed to download attachment: ${response.status}`);
+        return null;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const originalSize = buffer.length;
+
+      // Compress image: resize to max dimension and convert to JPEG
+      const compressed = await this.compressImage(buffer);
+      if (compressed) {
+        const base64 = compressed.toString('base64');
+        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Downloaded and compressed attachment: ${originalSize} -> ${compressed.length} bytes (${Math.round(compressed.length / originalSize * 100)}%)`);
+        return base64;
+      }
+
+      // Fallback to original if compression fails
+      const base64 = buffer.toString('base64');
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Downloaded attachment (uncompressed): ${base64.length} bytes (base64)`);
+      return base64;
+    } catch (error) {
+      console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error downloading attachment:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Compress an image: resize to max dimension and convert to JPEG
+   * Returns null if compression fails (e.g., unsupported format)
+   */
+  private async compressImage(buffer: Buffer): Promise<Buffer | null> {
+    try {
+      // Get image metadata
+      const metadata = await sharp(buffer).metadata();
+      const { width, height, format } = metadata;
+
+      if (!width || !height) {
+        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Could not get image dimensions, skipping compression`);
+        return null;
+      }
+
+      // Check if resizing is needed
+      const maxDim = Math.max(width, height);
+      const needsResize = maxDim > IMAGE_MAX_DIMENSION;
+
+      // Skip compression for small images that are already JPEG
+      if (!needsResize && format === 'jpeg') {
+        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Image already optimized (${width}x${height} ${format})`);
+        return buffer;
+      }
+
+      // Build sharp pipeline
+      let pipeline = sharp(buffer);
+
+      // Resize if needed (maintain aspect ratio)
+      if (needsResize) {
+        pipeline = pipeline.resize(IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION, {
+          fit: 'inside',
+          withoutEnlargement: true
+        });
+      }
+
+      // Convert to JPEG
+      const compressed = await pipeline
+        .jpeg({ quality: IMAGE_JPEG_QUALITY })
+        .toBuffer();
+
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Compressed image: ${width}x${height} ${format} -> JPEG (${needsResize ? 'resized' : 'same size'})`);
+      return compressed;
+    } catch (error) {
+      console.error(`[SignalWebSocketReceptor:${this.botPhone}] Image compression failed:`, error);
+      return null;
+    }
   }
 
   /**

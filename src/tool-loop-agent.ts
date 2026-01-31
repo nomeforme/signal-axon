@@ -158,9 +158,13 @@ export class ToolLoopAgent {
       }
     }
 
-    // Log full message history before sending to LLM
-    console.log(`[ToolLoopAgent] === FULL MESSAGE HISTORY (${messages.length} messages) ===`);
-    for (let i = 0; i < messages.length; i++) {
+    // Log message history before sending to LLM (last 10 messages only)
+    console.log(`[ToolLoopAgent] === MESSAGE HISTORY (${messages.length} total, showing last 10) ===`);
+    const startIndex = Math.max(0, messages.length - 10);
+    if (startIndex > 0) {
+      console.log(`[ToolLoopAgent] ... (${startIndex} earlier messages omitted)`);
+    }
+    for (let i = startIndex; i < messages.length; i++) {
       const msg = messages[i];
       const contentPreview = String(msg.content).substring(0, 300).replace(/\n/g, '\\n');
       console.log(`[ToolLoopAgent] [${i}] ${msg.role}: ${contentPreview}${String(msg.content).length > 300 ? '...' : ''}`);
@@ -173,9 +177,24 @@ export class ToolLoopAgent {
       tools: hasTools ? toolSchemas : undefined
     };
 
-    // DEBUG: Log full context being sent to LLM
+    // DEBUG: Log full context being sent to LLM (redact base64 image data)
     console.log(`\n[ToolLoopAgent] ========== FULL LLM REQUEST ==========`);
-    console.log(JSON.stringify(messages, null, 2));
+    const redactedMessages = messages.map(msg => {
+      if (msg.metadata?.attachments) {
+        return {
+          ...msg,
+          metadata: {
+            ...msg.metadata,
+            attachments: msg.metadata.attachments.map((att: any) => ({
+              ...att,
+              data: att.data ? `[BASE64 IMAGE: ${Math.round(att.data.length / 1024)}KB]` : undefined
+            }))
+          }
+        };
+      }
+      return msg;
+    });
+    console.log(JSON.stringify(redactedMessages, null, 2));
     console.log(`[ToolLoopAgent] ========== END LLM REQUEST ==========\n`);
 
     // Initial LLM call
