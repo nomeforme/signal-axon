@@ -266,17 +266,16 @@ export class SignalMessageReceptor {
       activationReason = 'dm';
     } else {
       // Group message with no specific target - check random reply
+      // Each bot independently rolls for random reply (no deduplication)
+      // This matches the non-gRPC behavior where each bot has a 1/N chance
       const randomChance = this.state.runtimeConfig.randomReplyChance;
       if (randomChance > 0 && !isSenderBot) {
-        // Use deduplication for random reply decision
-        const randomDedupeKey = `random-${event.sender}-${event.timestamp}`;
-        if (messageDeduplicator.shouldEmit(randomDedupeKey, botPhone, isGroupMessage)) {
-          const shouldRandomReply = Math.floor(Math.random() * randomChance) === 0;
-          if (shouldRandomReply) {
-            shouldActivate = true;
-            activationReason = 'random';
-            console.log(`[SignalMessageReceptor:${botName}] Random reply triggered (1/${randomChance})`);
-          }
+        const roll = Math.floor(Math.random() * randomChance) + 1;
+        const shouldRandomReply = roll === 1;
+        if (shouldRandomReply) {
+          shouldActivate = true;
+          activationReason = 'random';
+          console.log(`[SignalMessageReceptor:${botName}] Random reply triggered (roll=${roll}, chance=1/${randomChance})`);
         }
       }
     }
