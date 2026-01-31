@@ -179,6 +179,13 @@ export class SignalMessageReceptor {
       }
     }
 
+    // Don't emit bot messages to Connectome - they're already recorded via agent:speech
+    // This prevents duplicate facets (signal:message + agent:speech for same content)
+    if (isSenderBot && shouldEmitToConnectome) {
+      shouldEmitToConnectome = false;
+      console.log(`[SignalMessageReceptor:${botName}] Skipping bot message emission (recorded via agent:speech)`);
+    }
+
     if (shouldEmitToConnectome) {
       try {
         // Ensure stream exists on server
@@ -236,26 +243,21 @@ export class SignalMessageReceptor {
     let activationReason = '';
 
     if (botMentioned) {
-      // Check per-bot deduplication for targeted messages
+      // This bot was mentioned - activate
       if (this.hasProcessed(messageId)) {
         console.log(`[SignalMessageReceptor:${botName}] Already processed message ${messageId.substring(0, 30)}...`);
         return;
       }
       shouldActivate = true;
       activationReason = 'mention';
-    } else if (mentionedBotName) {
-      // Another bot was mentioned, this bot doesn't activate (but message was still emitted)
-      // Do nothing
     } else if (quotedBot) {
+      // This bot was quoted - activate
       if (this.hasProcessed(messageId)) {
         console.log(`[SignalMessageReceptor:${botName}] Already processed message ${messageId.substring(0, 30)}...`);
         return;
       }
       shouldActivate = true;
       activationReason = 'quote';
-    } else if (replyToBotName) {
-      // Another bot was quoted, this bot doesn't activate (but message was still emitted)
-      // Do nothing
     } else if (!isGroupMessage) {
       // DM - this bot should respond
       if (this.hasProcessed(messageId)) {
@@ -264,19 +266,22 @@ export class SignalMessageReceptor {
       }
       shouldActivate = true;
       activationReason = 'dm';
-    } else {
-      // Group message with no specific target - check random reply
-      // Each bot independently rolls for random reply (no deduplication)
-      // This matches the non-gRPC behavior where each bot has a 1/N chance
+    }
+
+    // Random reply check - applies to ALL group messages where this bot wasn't directly targeted
+    // This includes messages that mention OTHER bots (they can still trigger random reply)
+    if (!shouldActivate && isGroupMessage) {
       const randomChance = this.state.runtimeConfig.randomReplyChance;
       if (randomChance > 0 && !isSenderBot) {
         const roll = Math.floor(Math.random() * randomChance) + 1;
         const shouldRandomReply = roll === 1;
+        console.log(`[SignalMessageReceptor:${botName}] Random roll: ${roll}/${randomChance} (trigger=${shouldRandomReply})`);
         if (shouldRandomReply) {
           shouldActivate = true;
           activationReason = 'random';
-          console.log(`[SignalMessageReceptor:${botName}] Random reply triggered (roll=${roll}, chance=1/${randomChance})`);
         }
+      } else if (randomChance === 0) {
+        console.log(`[SignalMessageReceptor:${botName}] Random reply disabled (chance=0)`);
       }
     }
 
