@@ -169,13 +169,67 @@ export class SignalMessageReceptor {
     // ============================================================
     // For group messages, use deduplicator to ensure only one bot emits
     // For DMs, each bot handles their own stream so no deduplication needed
+    //
+    // SPECIAL CASE: If message has attachments AND targets specific bot(s) (mention/quote),
+    // the first targeted bot (alphabetically) gets emission priority instead of dedup lottery.
+    // This ensures the targeted bot has attachments in context when it activates.
+
+    // Check if message has image attachments
+    const hasImageAttachments = event.attachments?.some(
+      att => att.contentType?.startsWith('image/')
+    ) ?? false;
+
+    // Find all targeted bots (mentioned + quoted)
+    const targetedBotNames: string[] = [];
+    if (event.mentions) {
+      for (const mention of event.mentions) {
+        const name = this.state.botUuidToName.get(mention.uuid);
+        if (name && !targetedBotNames.includes(name)) {
+          targetedBotNames.push(name);
+        }
+      }
+    }
+    if (event.quotedMessage?.authorUuid) {
+      const quotedName = this.state.botUuidToName.get(event.quotedMessage.authorUuid);
+      if (quotedName && !targetedBotNames.includes(quotedName)) {
+        targetedBotNames.push(quotedName);
+      }
+    }
+
+    // Determine priority emitter for attachment+targeted case
+    let priorityEmitter: string | null = null;
+    if (hasImageAttachments && targetedBotNames.length > 0) {
+      // Sort alphabetically and pick first
+      targetedBotNames.sort();
+      priorityEmitter = targetedBotNames[0];
+      console.log(`[SignalMessageReceptor:${botName}] Message has image + targets: [${targetedBotNames.join(', ')}], priority emitter: ${priorityEmitter}`);
+    }
+
+    // Track if this bot should skip activation due to not being priority emitter
+    let skipActivationForPriority = false;
 
     if (isGroupMessage && shouldEmitToConnectome) {
-      // Group message - use deduplication so only one bot emits
-      const dedupeKey = `emit-${event.sender}-${event.timestamp}-${event.content?.substring(0, 50)}`;
-      if (!messageDeduplicator.shouldEmit(dedupeKey, botPhone, isGroupMessage)) {
-        shouldEmitToConnectome = false;
-        console.log(`[SignalMessageReceptor:${botName}] Another bot will emit this message to Connectome`);
+      if (priorityEmitter) {
+        // Attachment + targeted case: only priority emitter emits
+        if (botName !== priorityEmitter) {
+          shouldEmitToConnectome = false;
+          // If this bot IS targeted but not priority emitter, skip activation too
+          if (targetedBotNames.includes(botName)) {
+            skipActivationForPriority = true;
+            console.log(`[SignalMessageReceptor:${botName}] Skipping (targeted but not priority emitter, ${priorityEmitter} will handle)`);
+          } else {
+            console.log(`[SignalMessageReceptor:${botName}] Not priority emitter, ${priorityEmitter} will emit`);
+          }
+        } else {
+          console.log(`[SignalMessageReceptor:${botName}] I am priority emitter for attachment message`);
+        }
+      } else {
+        // Normal case: use deduplication lottery
+        const dedupeKey = `emit-${event.sender}-${event.timestamp}-${event.content?.substring(0, 50)}`;
+        if (!messageDeduplicator.shouldEmit(dedupeKey, botPhone, isGroupMessage)) {
+          shouldEmitToConnectome = false;
+          console.log(`[SignalMessageReceptor:${botName}] Another bot will emit this message to Connectome`);
+        }
       }
     }
 
@@ -287,6 +341,12 @@ export class SignalMessageReceptor {
 
     // If not activating, we're done (message was already emitted to Connectome)
     if (!shouldActivate) {
+      return;
+    }
+
+    // Skip activation if this bot was targeted but not the priority emitter
+    // (The priority emitter will handle both emit and activation)
+    if (skipActivationForPriority) {
       return;
     }
 
