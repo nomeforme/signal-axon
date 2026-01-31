@@ -1,76 +1,19 @@
 /**
  * Signal AXON Module for Connectome
  *
- * Exports RETM components for Signal messenger integration
+ * Exports gRPC components for Signal messenger integration
  */
 
-import { SignalAfferent, SignalAfferentConfig } from './signal-afferent';
-import { SignalMessageReceptor, SignalReceiptReceptor, SignalTypingReceptor, SignalReceptorConfig } from './signal-receptor';
-import { SignalSpeechEffector, SignalCommandEffector, SignalEffectorConfig, ConfigUpdateCallback } from './signal-effector';
-import { MessageConsistencyReceptor, MessageConsistencyConfig } from './message-consistency-receptor';
-import { messageDeduplicator } from './message-deduplicator';
+// Re-export everything from gRPC module
+export * from './grpc/index.js';
 
-// Re-export types and classes
-export {
-  SignalAfferent,
-  SignalAfferentConfig,
-  SignalMessageReceptor,
-  SignalReceiptReceptor,
-  SignalTypingReceptor,
-  SignalReceptorConfig,
-  SignalSpeechEffector,
-  SignalCommandEffector,
-  SignalEffectorConfig,
-  ConfigUpdateCallback,
-  MessageConsistencyReceptor,
-  MessageConsistencyConfig,
-  messageDeduplicator
-};
+// Also export message deduplicator (shared utility)
+export { messageDeduplicator } from './message-deduplicator.js';
 
-/**
- * Factory function to create Signal components for a bot
- *
- * This is a convenience helper for applications that want to quickly
- * set up Signal integration.
- */
-export function createSignalComponents(config: {
-  botPhone: string;
-  wsUrl: string;
-  apiUrl: string;
-  botUuids: Map<string, string>;
-  botNames: Map<string, string>;
-}) {
-  const afferent = new SignalAfferent();
-
-  const receptorConfig: SignalReceptorConfig = {
-    botUuids: config.botUuids,
-    botNames: config.botNames
-  };
-
-  const messageReceptor = new SignalMessageReceptor(receptorConfig);
-  const receiptReceptor = new SignalReceiptReceptor();
-  const typingReceptor = new SignalTypingReceptor();
-
-  const effectorConfig: SignalEffectorConfig = {
-    apiUrl: config.apiUrl,
-    botNames: config.botNames
-  };
-
-  const speechEffector = new SignalSpeechEffector(effectorConfig);
-
-  return {
-    afferent,
-    afferentConfig: {
-      botPhone: config.botPhone,
-      wsUrl: config.wsUrl
-    },
-    receptors: {
-      message: messageReceptor,
-      receipt: receiptReceptor,
-      typing: typingReceptor
-    },
-    effectors: {
-      speech: speechEffector
-    }
-  };
-}
+// Export LLM providers (shared with discord-axon)
+export { ToolLoopAgent, createFetchTool } from './tool-loop-agent.js';
+export type { ToolHandler, ToolLoopAgentConfig } from './tool-loop-agent.js';
+export { AnthropicToolProvider } from './anthropic-tool-provider.js';
+export type { AnthropicToolProviderConfig, ToolSchema, ToolLLMOptions, ToolLLMResponse } from './anthropic-tool-provider.js';
+export { BedrockProvider } from './bedrock-provider.js';
+export type { BedrockProviderConfig } from './bedrock-provider.js';
