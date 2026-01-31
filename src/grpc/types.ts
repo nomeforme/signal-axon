@@ -27,13 +27,10 @@ export interface BotConfig {
  */
 export interface SignalConfig {
   bots: BotConfig[];
-  max_history_messages?: number;
-  max_conversation_frames?: number;
   group_privacy_mode?: 'opt-in' | 'opt-out';
-  trusted_phone_numbers?: string[];
   random_reply_chance?: number;
   max_bot_mentions_per_conversation?: number;
-  default_model?: string;
+  max_conversation_frames?: number;
 }
 
 /**

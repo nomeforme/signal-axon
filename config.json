@@ -118,17 +118,8 @@
       ]
     }
   ],
-  "max_history_messages": 200,
   "group_privacy_mode": "opt-out",
-  "trusted_phone_numbers": [],
-  "session_timeout": 30,
-  "default_model": "claude-haiku-4-5-20251001",
-  "default_system_instruction": "Standard",
-  "default_image_size": "portrait_3_4",
-  "lora_path_to_url": {},
-  "prompt_replace_dict": {},
   "random_reply_chance": 200,
   "max_bot_mentions_per_conversation": 1,
-  "max_conversation_frames": 100,
-  "max_memory_frames": 200
+  "max_conversation_frames": 100
 }
