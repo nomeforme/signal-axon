@@ -119,7 +119,13 @@ export class SignalMessageReceptor {
     // Check if this bot was mentioned
     const botMentioned = this.isBotMentioned(event.mentions, botName);
     // Check if this bot was quoted
-    const quotedBot = this.findQuotedBot(event.quotedMessage) === botName;
+    const quotedBotName = this.findQuotedBot(event.quotedMessage);
+    const quotedBot = quotedBotName === botName;
+
+    // Debug logging for quote detection
+    if (event.quotedMessage) {
+      console.log(`[SignalMessageReceptor:${botName}] Quote detected - authorUuid: ${event.quotedMessage.authorUuid}, resolved to: ${quotedBotName || 'unknown'}, isMe: ${quotedBot}`);
+    }
 
     // ============================================================
     // STEP 1: Handle privacy mode for group messages

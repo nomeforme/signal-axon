@@ -186,6 +186,11 @@ export class SignalWebSocketReceptor {
     const mentions = dataMessage.mentions || [];
     const quote = dataMessage.quote;
 
+    // Debug logging for quote data from Signal CLI
+    if (quote) {
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Raw quote data: id=${quote.id}, author=${quote.author}, authorUuid=${quote.authorUuid}, text=${quote.text?.substring(0, 30)}...`);
+    }
+
     // Log bot messages for debugging, but forward ALL messages to handler
     if (this.isBotUuid(sourceUuid)) {
       console.log(`[SignalWebSocketReceptor:${this.botPhone}] Forwarding bot message from ${sourceUuid} to message receptor`);
