@@ -27,7 +27,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@connectome/axon-interfaces": "file:../connectome-axon-interfaces",
     "@connectome/axon-server": "file:../axon-server",
-    "@connectome/grpc": "file:../connectome-grpc",
+    "@connectome/grpc-common": "file:../connectome-grpc-common",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.6.0",
     "dotenv": "^16.4.0",
