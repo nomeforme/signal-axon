@@ -99,7 +99,8 @@ export class SignalSpeechEffector {
 
         const body: any = {
           number: botPhone,
-          message: chunk
+          message: chunk,
+          text_mode: 'styled'  // Enable Signal text formatting
         };
 
         // Only include mentions in the first chunk

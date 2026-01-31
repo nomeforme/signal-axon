@@ -438,7 +438,8 @@ export class SignalMessageReceptor {
 
     const body: any = {
       number: this.bot.config.phone,
-      message: content
+      message: content,
+      text_mode: 'styled'  // Enable Signal text formatting
     };
 
     if (originalEvent.groupId) {

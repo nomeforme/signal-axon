@@ -154,7 +154,8 @@ export class SignalAgentEffector {
 
         const body: any = {
           number: botPhone,
-          message: chunk
+          message: chunk,
+          text_mode: 'styled'  // Enable Signal text formatting (*bold*, _italic_, etc.)
         };
 
         // Only include mentions in the first chunk
@@ -227,7 +228,8 @@ export class SignalAgentEffector {
 
       const body: any = {
         number: botPhone,
-        message: `Error: ${errorMessage}`
+        message: `Error: ${errorMessage}`,
+        text_mode: 'styled'
       };
 
       if (originalEvent.groupId) {
