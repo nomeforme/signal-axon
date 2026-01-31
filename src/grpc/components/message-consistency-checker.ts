@@ -156,7 +156,9 @@ export class MessageConsistencyChecker {
           setTimeout(async () => {
             try {
               console.log(`  ✓ Re-processing message for ${botName}`);
-              await messageHandler(tracker.messagePayload);
+              // Update botPhone to match the receiving bot
+              const adjustedPayload = { ...tracker.messagePayload, botPhone: phone };
+              await messageHandler(adjustedPayload);
             } catch (error: any) {
               console.error(`  ✗ Failed to re-process message for ${botName}:`, error.message);
             }

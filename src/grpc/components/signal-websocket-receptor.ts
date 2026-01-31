@@ -16,6 +16,7 @@ import type { SignalMessageEvent, SignalAttachment, SignalMention, SignalQuote }
 export interface SignalWebSocketReceptorConfig {
   wsUrl: string;
   botPhone: string;
+  botUuid?: string;  // THIS bot's UUID (for checking if mentioned)
   botUuids?: Map<string, string>;  // All bot UUIDs for bot message detection
   onMessage: (event: SignalMessageEvent) => Promise<void>;
   onReceipt: (receipt: SignalReceiptEvent) => Promise<void>;
@@ -50,6 +51,7 @@ export class SignalWebSocketReceptor {
   private ws: WebSocket | null = null;
   private wsUrl: string;
   private botPhone: string;
+  private botUuid: string | undefined;
   private botUuids: Map<string, string>;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private reconnectDelay: number = 5000;
@@ -63,6 +65,7 @@ export class SignalWebSocketReceptor {
   constructor(config: SignalWebSocketReceptorConfig) {
     this.wsUrl = config.wsUrl;
     this.botPhone = config.botPhone;
+    this.botUuid = config.botUuid;
     this.botUuids = config.botUuids || new Map();
     this.onMessage = config.onMessage;
     this.onReceipt = config.onReceipt;
@@ -166,10 +169,20 @@ export class SignalWebSocketReceptor {
     const source = env.source || env.sourceNumber;
     const sourceUuid = env.sourceUuid;
 
-    // Skip messages from bots
+    // Check if this bot is mentioned or quoted in the message
+    const mentions = dataMessage.mentions || [];
+    const quote = dataMessage.quote;
+    const isMentioned = this.botUuid && mentions.some((m: any) => m.uuid === this.botUuid);
+    const isQuoted = this.botUuid && quote?.authorUuid === this.botUuid;
+
+    // Skip messages from bots UNLESS this bot is mentioned or quoted
     if (this.isBotUuid(sourceUuid)) {
-      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Skipping message from bot ${sourceUuid}`);
-      return;
+      if (isMentioned || isQuoted) {
+        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Processing bot message (mentioned=${isMentioned}, quoted=${isQuoted})`);
+      } else {
+        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Skipping message from bot ${sourceUuid}`);
+        return;
+      }
     }
 
     // Build message event
@@ -183,8 +196,8 @@ export class SignalWebSocketReceptor {
       botPhone: this.botPhone,
       timestamp: dataMessage.timestamp,
       attachments: this.parseAttachments(dataMessage.attachments),
-      mentions: this.parseMentions(dataMessage.mentions),
-      quotedMessage: this.parseQuote(dataMessage.quote)
+      mentions: this.parseMentions(mentions),
+      quotedMessage: this.parseQuote(quote)
     };
 
     try {

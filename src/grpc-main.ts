@@ -35,6 +35,7 @@ import {
   MessageConsistencyChecker,
   // Utilities
   getNameToUuidCache,
+  getNameToPhoneCache,
   // Types
   type SharedState,
   type RuntimeConfig,
@@ -100,14 +101,20 @@ async function main(): Promise<void> {
     }
   }
 
-  // Populate the name → UUID cache for mention detection in bot speech
-  // This allows bots to mention each other with @name and have it converted to Signal format
+  // Populate the name → UUID cache for incoming mention resolution
   const nameToUuidCache = getNameToUuidCache();
   for (const [uuid, name] of botUuidToName) {
-    // Store lowercase name for case-insensitive matching
     nameToUuidCache.set(name.toLowerCase(), uuid);
   }
   console.log(`  Populated name→UUID cache with ${nameToUuidCache.size} bot(s)`);
+
+  // Populate the name → phone cache for outgoing mention creation
+  // Signal CLI API requires phone numbers, not UUIDs
+  const nameToPhoneCache = getNameToPhoneCache();
+  for (const [phone, name] of botPhoneToName) {
+    nameToPhoneCache.set(name.toLowerCase(), phone);
+  }
+  console.log(`  Populated name→phone cache with ${nameToPhoneCache.size} bot(s)`);
   console.log();
 
   // Initialize shared state
@@ -181,8 +188,7 @@ async function main(): Promise<void> {
       botName: botConfig.name,
       systemPrompt: botConfig.prompt || 'Standard',
       maxConversationFrames: state.runtimeConfig.maxConversationFrames,
-      maxTokens: botConfig.max_tokens || 50000,
-      allBotNames  // Include all bot names for mention context
+      maxTokens: botConfig.max_tokens || 50000
     });
     contextTransforms.push(contextTransform);
 
@@ -225,6 +231,7 @@ async function main(): Promise<void> {
     const wsReceptor = new SignalWebSocketReceptor({
       wsUrl,
       botPhone,
+      botUuid: botPhoneToUuid.get(botPhone),  // This bot's UUID for mention detection
       botUuids: botPhoneToUuid,
       onMessage: async (event) => {
         // Record for consistency checking BEFORE any filtering

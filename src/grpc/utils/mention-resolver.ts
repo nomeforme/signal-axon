@@ -5,15 +5,28 @@
  * The mention's position in the text corresponds to the index in the mentions array.
  */
 
-import type { SignalMention } from '../types.js';
+import type { SignalMention, SignalOutgoingMention } from '../types.js';
 
 // U+FFFC - Object Replacement Character (Signal uses this for mention placeholders)
 const MENTION_PLACEHOLDER = '\uFFFC';
 
 /**
- * Cache of name → UUID mappings for mention detection
+ * Cache of name → phone mappings for outgoing mention detection
+ * Signal CLI API requires phone numbers, not UUIDs
+ */
+const nameToPhoneCache = new Map<string, string>();
+
+/**
+ * Cache of name → UUID mappings for incoming mention resolution
  */
 const nameToUuidCache = new Map<string, string>();
+
+/**
+ * Get the name → phone cache (for external population)
+ */
+export function getNameToPhoneCache(): Map<string, string> {
+  return nameToPhoneCache;
+}
 
 /**
  * Get the name → UUID cache (for external population)
@@ -59,55 +72,58 @@ export function replaceMentionPlaceholders(
  * Detect @name patterns in speech content and convert to Signal mention format
  *
  * @param content - Speech content with @name patterns
- * @param nameToUuid - Map of name → UUID
+ * @param nameToPhone - Map of name → phone number (Signal CLI API requires phone, not UUID)
  * @returns Object with processed content (FFFC placeholders) and mentions array
  */
 export function detectAndConvertMentions(
   content: string,
-  nameToUuid: Map<string, string>
-): { content: string; mentions: SignalMention[] } {
-  const mentions: SignalMention[] = [];
+  nameToPhone: Map<string, string>
+): { content: string; mentions: SignalOutgoingMention[] } {
+  const mentions: SignalOutgoingMention[] = [];
 
-  // Pattern to match @name (word characters after @)
-  const mentionPattern = /@([a-zA-Z0-9_-]+)/g;
+  // Sort names by length (longest first) to avoid partial matches
+  const sortedNames = Array.from(nameToPhone.keys()).sort((a, b) => b.length - a.length);
 
-  let result = content;
-  let match;
-  let offset = 0;
+  let modifiedText = content;
 
-  // Find all @name patterns
-  const matches: Array<{ fullMatch: string; name: string; index: number }> = [];
-  while ((match = mentionPattern.exec(content)) !== null) {
-    matches.push({
-      fullMatch: match[0],
-      name: match[1].toLowerCase(),
-      index: match.index
-    });
-  }
+  for (const name of sortedNames) {
+    const phone = nameToPhone.get(name);
+    if (!phone) continue;
 
-  // Process in reverse order to maintain positions
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const m = matches[i];
-    const uuid = nameToUuid.get(m.name);
+    let searchPos = 0;
+    while (true) {
+      // Look for @name patterns
+      const pos = modifiedText.indexOf(`@${name}`, searchPos);
+      if (pos === -1) break;
 
-    if (uuid) {
-      // Replace @name with FFFC placeholder
-      const adjustedIndex = m.index;
-      result =
-        result.substring(0, adjustedIndex) +
-        MENTION_PLACEHOLDER +
-        result.substring(adjustedIndex + m.fullMatch.length);
+      const matchLength = name.length + 1; // +1 for @ symbol
 
-      // Add mention (position will be at the placeholder)
-      mentions.unshift({
-        start: adjustedIndex,
-        length: 1,  // FFFC is 1 character
-        uuid
-      });
+      // Check word boundaries (character after the name)
+      const charAfter = pos + matchLength < modifiedText.length ? modifiedText[pos + matchLength] : ' ';
+      const afterOk = ' \n\t,.:;!?)\'"'.includes(charAfter);
+
+      if (afterOk) {
+        // Calculate UTF-16 position (Signal uses UTF-16 offsets)
+        const utf16Start = Buffer.from(modifiedText.substring(0, pos), 'utf16le').length / 2;
+
+        // Replace @name with Signal's object replacement character
+        modifiedText = modifiedText.substring(0, pos) + MENTION_PLACEHOLDER + modifiedText.substring(pos + matchLength);
+
+        console.log(`[MentionResolver] Creating mention for '@${name}' -> phone: ${phone} at position ${utf16Start}`);
+        mentions.push({
+          start: utf16Start,
+          length: 1,
+          author: phone
+        });
+
+        searchPos = pos + 1;
+      } else {
+        searchPos = pos + 1;
+      }
     }
   }
 
-  return { content: result, mentions };
+  return { content: modifiedText, mentions };
 }
 
 /**

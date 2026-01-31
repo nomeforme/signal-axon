@@ -13,7 +13,7 @@
  */
 
 import axios from 'axios';
-import { cleanSpeechContent, splitMessage, detectAndConvertMentions, getNameToUuidCache, convertGroupId } from '../utils/index.js';
+import { cleanSpeechContent, splitMessage, detectAndConvertMentions, getNameToPhoneCache, convertGroupId } from '../utils/index.js';
 import { getSignalCliConfig } from '../config-loader.js';
 import type { SignalGrpcClient } from '../client.js';
 import type { ToolLoopAgent } from '../../tool-loop-agent.js';
@@ -141,10 +141,10 @@ export class SignalAgentEffector {
     try {
       const { apiUrl } = getSignalCliConfig();
 
-      // Detect @mentions and convert to Signal format
+      // Detect @mentions and convert to Signal format (uses phone numbers for Signal CLI API)
       const { content: contentWithMentions, mentions } = detectAndConvertMentions(
         cleanedContent,
-        getNameToUuidCache()
+        getNameToPhoneCache()
       );
 
       // Split and send

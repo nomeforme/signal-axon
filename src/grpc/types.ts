@@ -106,12 +106,21 @@ export interface SignalAttachment {
 }
 
 /**
- * Signal mention (position-based)
+ * Signal mention (position-based) - for INCOMING messages
  */
 export interface SignalMention {
   start: number;
   length: number;
   uuid: string;
+}
+
+/**
+ * Signal mention for OUTGOING messages - Signal CLI API expects phone number
+ */
+export interface SignalOutgoingMention {
+  start: number;
+  length: number;
+  author: string;  // phone number, NOT uuid
 }
 
 /**

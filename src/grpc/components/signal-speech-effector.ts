@@ -10,7 +10,7 @@
  */
 
 import axios from 'axios';
-import { cleanSpeechContent, splitMessage, detectAndConvertMentions, getNameToUuidCache, convertGroupId } from '../utils/index.js';
+import { cleanSpeechContent, splitMessage, detectAndConvertMentions, getNameToPhoneCache, convertGroupId } from '../utils/index.js';
 import { getSignalCliConfig } from '../config-loader.js';
 import type { StreamManager, StreamInfo } from '../stream-manager.js';
 import type { BotConfig } from '../types.js';
@@ -85,10 +85,10 @@ export class SignalSpeechEffector {
 
       const { apiUrl } = getSignalCliConfig();
 
-      // Detect @mentions and convert to Signal format
+      // Detect @mentions and convert to Signal format (uses phone numbers for Signal CLI API)
       const { content: contentWithMentions, mentions } = detectAndConvertMentions(
         cleanedContent,
-        getNameToUuidCache()
+        getNameToPhoneCache()
       );
 
       // Split if too long

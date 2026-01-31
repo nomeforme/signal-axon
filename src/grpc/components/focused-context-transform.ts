@@ -45,8 +45,6 @@ export interface FocusedContextTransformConfig {
   systemPrompt: string;
   maxConversationFrames: number;
   maxTokens: number;
-  /** All bot names in the system for mention context */
-  allBotNames?: string[];
 }
 
 /**
@@ -60,7 +58,6 @@ export class FocusedContextTransform {
   private systemPrompt: string;
   private maxConversationFrames: number;
   private maxTokens: number;
-  private allBotNames: string[];
 
   constructor(config: FocusedContextTransformConfig) {
     this.grpcClient = config.grpcClient;
@@ -68,7 +65,6 @@ export class FocusedContextTransform {
     this.systemPrompt = config.systemPrompt;
     this.maxConversationFrames = config.maxConversationFrames;
     this.maxTokens = config.maxTokens;
-    this.allBotNames = config.allBotNames || [];
   }
 
   /**
@@ -201,14 +197,7 @@ export class FocusedContextTransform {
    * Build system prompt with bot identity and Signal capabilities
    */
   private buildSystemPrompt(): string {
-    // List other bots for mention context
-    const otherBots = this.allBotNames.filter(name => name !== this.botName);
-    const participantContext = otherBots.length > 0
-      ? `\n\nOther bots in this chat: ${otherBots.map(n => `@${n}`).join(', ')}
-IMPORTANT: To mention another bot, use their EXACT username with @ prefix (e.g., @${otherBots[0] || 'bot-name'}). Do not use display names or nicknames.`
-      : '';
-
-    const identityPrompt = `You are <${this.botName}> in Signal messenger.${participantContext}
+    const identityPrompt = `You are <${this.botName}> in Signal messenger.
 
 To mention users, use @username syntax. The system will convert usernames to Signal mention format automatically.`;
 

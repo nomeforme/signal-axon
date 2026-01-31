@@ -4,6 +4,7 @@
 
 export {
   getNameToUuidCache,
+  getNameToPhoneCache,
   replaceMentionPlaceholders,
   detectAndConvertMentions,
   stripMentionPlaceholders
