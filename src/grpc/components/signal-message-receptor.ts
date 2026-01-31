@@ -78,12 +78,33 @@ export class SignalMessageReceptor {
   }
 
   /**
+   * Get this bot's UUID by reverse lookup from botUuidToName
+   */
+  private getBotUuid(): string | undefined {
+    const botName = this.bot.config.name;
+    for (const [uuid, name] of this.state.botUuidToName) {
+      if (name === botName) {
+        return uuid;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Handle incoming Signal message
    * Called by SignalWebSocketReceptor when a message is received
+   *
+   * Flow:
+   * 1. Handle privacy mode (opt-in/opt-out) with `.` prefix
+   * 2. Emit messages to Connectome based on privacy mode rules
+   * 3. Check if should activate agent (bot mentioned/quoted)
+   * 4. Check for self-mention (bot should not respond to itself)
+   * 5. If yes, run agent
    */
   async handleMessage(event: SignalMessageEvent): Promise<void> {
     const botName = this.bot.config.name;
     const botPhone = this.bot.config.phone!;
+    const botUuid = this.getBotUuid();
 
     // Build stream ID for tracking
     // For DMs: include bot phone to isolate each bot's conversation with a user
@@ -93,59 +114,150 @@ export class SignalMessageReceptor {
       : `signal:dm:${botPhone}:${event.senderNumber || event.senderUuid}`;
 
     const isGroupMessage = !!event.groupId;
+    const groupPrivacyMode = this.state.runtimeConfig.groupPrivacyMode;
+
+    // Check if this bot was mentioned
+    const botMentioned = this.isBotMentioned(event.mentions, botName);
+    // Check if this bot was quoted
+    const quotedBot = this.findQuotedBot(event.quotedMessage) === botName;
+
+    // ============================================================
+    // STEP 1: Handle privacy mode for group messages
+    // ============================================================
+    let processedContent = event.content || '';
+    let shouldEmitToConnectome = true;
+
+    if (isGroupMessage) {
+      const hasDotPrefix = processedContent.startsWith('.');
+
+      if (groupPrivacyMode === 'opt-in') {
+        // Opt-in: Only store/process messages with "." prefix OR when bot is mentioned/quoted
+        if (!hasDotPrefix && !botMentioned && !quotedBot) {
+          // Message doesn't qualify for storage in opt-in mode
+          shouldEmitToConnectome = false;
+          console.log(`[SignalMessageReceptor:${botName}] Opt-in mode: Skipping message (no prefix, not mentioned)`);
+        }
+        // Remove "." prefix if present for processing
+        if (hasDotPrefix) {
+          processedContent = processedContent.substring(1).trim();
+        }
+      } else {
+        // Opt-out (default): Store ALL messages UNLESS prefixed with "."
+        if (hasDotPrefix) {
+          // User explicitly opted out - don't store or respond
+          console.log(`[SignalMessageReceptor:${botName}] Opt-out mode: Skipping message with '.' prefix`);
+          return;
+        }
+      }
+    }
 
     // Replace mention placeholders with @name for readable content
     const readableContent = replaceMentionPlaceholders(
-      event.content,
+      processedContent,
       event.mentions,
       this.state.botUuidToName
     );
 
-    // Check routing FIRST (before deduplication)
-    // This ensures that messages with specific targets (mentions/replies)
-    // are handled by the correct bot, not just whichever bot wins the race
+    // Build message ID for deduplication
+    const messageId = `${event.senderUuid || event.sender}-${event.timestamp}`;
+
+    // Check if sender is a bot
+    const isSenderBot = this.state.botUuidToName.has(event.senderUuid || '');
+
+    // ============================================================
+    // STEP 2: Emit messages to Connectome (based on privacy mode and deduplication)
+    // ============================================================
+    // For group messages, use deduplicator to ensure only one bot emits
+    // For DMs, each bot handles their own stream so no deduplication needed
+
+    if (isGroupMessage && shouldEmitToConnectome) {
+      // Group message - use deduplication so only one bot emits
+      const dedupeKey = `emit-${event.sender}-${event.timestamp}-${event.content?.substring(0, 50)}`;
+      if (!messageDeduplicator.shouldEmit(dedupeKey, botPhone, isGroupMessage)) {
+        shouldEmitToConnectome = false;
+        console.log(`[SignalMessageReceptor:${botName}] Another bot will emit this message to Connectome`);
+      }
+    }
+
+    if (shouldEmitToConnectome) {
+      try {
+        // Ensure stream exists on server
+        await this.bot.streamManager.getOrCreateStream(
+          event.groupId || event.senderNumber || event.senderUuid || 'unknown',
+          {
+            conversationType: event.groupId ? 'group' : 'dm',
+            groupId: event.groupId,
+            groupName: event.groupName,
+            contactNumber: event.senderNumber,
+            contactUuid: event.senderUuid,
+            botPhone
+          }
+        );
+
+        // Emit message to Connectome (creates facet in VEIL for context)
+        await this.bot.grpcClient.emitSignalMessage({
+          content: readableContent,
+          sender: event.sender,
+          senderNumber: event.senderNumber,
+          senderUuid: event.senderUuid,
+          groupId: event.groupId,
+          groupName: event.groupName,
+          botPhone,
+          timestamp: event.timestamp,
+          attachments: event.attachments,
+          mentions: event.mentions,
+          quotedMessage: event.quotedMessage
+        });
+
+        console.log(`[SignalMessageReceptor:${botName}] Emitted message to Connectome: ${readableContent.substring(0, 50)}...`);
+      } catch (error: any) {
+        console.error(`[SignalMessageReceptor:${botName}] Error emitting to Connectome:`, error.message);
+      }
+    }
+
+    // ============================================================
+    // STEP 3: Check for self-mention (bot should not respond to itself)
+    // ============================================================
+    const isSelfMention = botUuid && event.senderUuid === botUuid;
+    if (isSelfMention) {
+      console.log(`[SignalMessageReceptor:${botName}] Ignoring self-mention (sender is this bot)`);
+      // Message was already emitted to Connectome for context, but don't activate agent
+      return;
+    }
+
+    // ============================================================
+    // STEP 4: Determine if agent should be activated
+    // ============================================================
+    // We already computed botMentioned and quotedBot earlier for privacy mode
     const mentionedBotName = this.findMentionedBot(event.mentions);
     const replyToBotName = this.findQuotedBot(event.quotedMessage);
 
-    // Routing logic: determine if this bot should handle the message
     let shouldActivate = false;
     let activationReason = '';
-    let hasSpecificTarget = false; // True if message is meant for a specific bot
 
-    // Build message ID for per-bot deduplication
-    const messageId = `${event.senderUuid || event.sender}-${event.timestamp}`;
-
-    if (mentionedBotName) {
-      hasSpecificTarget = true;
-      if (mentionedBotName === botName) {
-        // Check per-bot deduplication for targeted messages
-        // This prevents double-processing when WebSocket reconnects
-        if (this.hasProcessed(messageId)) {
-          console.log(`[SignalMessageReceptor:${botName}] Already processed message ${messageId.substring(0, 30)}...`);
-          return;
-        }
-        shouldActivate = true;
-        activationReason = 'mention';
-      } else {
-        // Message is for a different bot - skip without logging (reduces noise)
+    if (botMentioned) {
+      // Check per-bot deduplication for targeted messages
+      if (this.hasProcessed(messageId)) {
+        console.log(`[SignalMessageReceptor:${botName}] Already processed message ${messageId.substring(0, 30)}...`);
         return;
       }
+      shouldActivate = true;
+      activationReason = 'mention';
+    } else if (mentionedBotName) {
+      // Another bot was mentioned, this bot doesn't activate (but message was still emitted)
+      // Do nothing
+    } else if (quotedBot) {
+      if (this.hasProcessed(messageId)) {
+        console.log(`[SignalMessageReceptor:${botName}] Already processed message ${messageId.substring(0, 30)}...`);
+        return;
+      }
+      shouldActivate = true;
+      activationReason = 'quote';
     } else if (replyToBotName) {
-      hasSpecificTarget = true;
-      if (replyToBotName === botName) {
-        // Check per-bot deduplication for targeted messages
-        if (this.hasProcessed(messageId)) {
-          console.log(`[SignalMessageReceptor:${botName}] Already processed message ${messageId.substring(0, 30)}...`);
-          return;
-        }
-        shouldActivate = true;
-        activationReason = 'quote';
-      } else {
-        // Reply is for a different bot - skip without logging (reduces noise)
-        return;
-      }
+      // Another bot was quoted, this bot doesn't activate (but message was still emitted)
+      // Do nothing
     } else if (!isGroupMessage) {
-      // DM - check per-bot dedup (in case of WebSocket reconnect)
+      // DM - this bot should respond
       if (this.hasProcessed(messageId)) {
         console.log(`[SignalMessageReceptor:${botName}] Already processed DM ${messageId.substring(0, 30)}...`);
         return;
@@ -153,68 +265,61 @@ export class SignalMessageReceptor {
       shouldActivate = true;
       activationReason = 'dm';
     } else {
-      // Group message with no specific target - use deduplication
-      // Only ONE bot should process (for random reply or just to emit the message)
-      const dedupeKey = `${event.sender}-${event.timestamp}-${event.content?.substring(0, 50)}`;
-      if (!messageDeduplicator.shouldEmit(dedupeKey, botPhone, isGroupMessage)) {
-        console.log(`[SignalMessageReceptor:${botName}] Skipping duplicate message`);
-        return;
-      }
-
-      // Check random reply
+      // Group message with no specific target - check random reply
       const randomChance = this.state.runtimeConfig.randomReplyChance;
-      if (randomChance > 0) {
-        const shouldRandomReply = Math.floor(Math.random() * randomChance) === 0;
-        if (shouldRandomReply) {
-          shouldActivate = true;
-          activationReason = 'random';
-          console.log(`[SignalMessageReceptor:${botName}] Random reply triggered (1/${randomChance})`);
+      if (randomChance > 0 && !isSenderBot) {
+        // Use deduplication for random reply decision
+        const randomDedupeKey = `random-${event.sender}-${event.timestamp}`;
+        if (messageDeduplicator.shouldEmit(randomDedupeKey, botPhone, isGroupMessage)) {
+          const shouldRandomReply = Math.floor(Math.random() * randomChance) === 0;
+          if (shouldRandomReply) {
+            shouldActivate = true;
+            activationReason = 'random';
+            console.log(`[SignalMessageReceptor:${botName}] Random reply triggered (1/${randomChance})`);
+          }
         }
       }
     }
 
-    // Log activation reason if we're going to process
-    if (shouldActivate) {
-      console.log(`[SignalMessageReceptor:${botName}] Message from ${event.sender}: ${readableContent.substring(0, 50)}... (${activationReason})`);
+    // If not activating, we're done (message was already emitted to Connectome)
+    if (!shouldActivate) {
+      return;
     }
 
-    // Handle ! commands (only if we're the one processing this message)
-    // Parse command from message - strip @mention prefix if present
+    // Log activation
+    console.log(`[SignalMessageReceptor:${botName}] Activating for message from ${event.sender}: ${readableContent.substring(0, 50)}... (${activationReason})`);
+
+    // Handle ! commands
     const commandText = this.parseCommand(readableContent);
-    if (shouldActivate && commandText) {
+    if (commandText) {
       const response = this.commandEffector.handleCommand(
         commandText,
         this.state.runtimeConfig,
         this.updateConfig
       );
       if (response) {
-        // Send command response directly
         try {
           await this.sendSignalMessage(response, event);
           console.log(`[SignalMessageReceptor:${botName}] Handled command: ${commandText.substring(0, 30)}...`);
         } catch (error: any) {
           console.error(`[SignalMessageReceptor:${botName}] Error sending command response:`, error.message);
         }
-        return; // Command handled, don't process further
+        return; // Command handled, don't run agent
       }
     }
 
-    if (!shouldActivate) {
-      return;
-    }
-
     // Mark this message as processed by this bot
-    // This prevents duplicate processing on WebSocket reconnection
     this.markProcessed(messageId);
 
-    // Bot-to-bot limiting (check if sender is a bot)
-    const isSenderBot = this.state.botUuidToName.has(event.senderUuid || '');
+    // ============================================================
+    // STEP 5: Bot-to-bot limiting and agent activation
+    // ============================================================
     if (isSenderBot) {
       const currentCount = this.state.botInteractionCounts.get(streamId) || 0;
       const maxBotMentions = this.state.runtimeConfig.maxBotMentionsPerConversation;
 
       if (maxBotMentions > 0 && currentCount >= maxBotMentions) {
-        console.log(`[SignalMessageReceptor:${botName}] Bot-to-bot limit reached (${currentCount}/${maxBotMentions}), skipping`);
+        console.log(`[SignalMessageReceptor:${botName}] Bot-to-bot limit reached (${currentCount}/${maxBotMentions}), skipping agent`);
         return;
       }
 
@@ -228,36 +333,8 @@ export class SignalMessageReceptor {
       }
     }
 
+    // Trigger agent activation
     try {
-      // Ensure stream exists on server
-      await this.bot.streamManager.getOrCreateStream(
-        event.groupId || event.senderNumber || event.senderUuid || 'unknown',
-        {
-          conversationType: event.groupId ? 'group' : 'dm',
-          groupId: event.groupId,
-          groupName: event.groupName,
-          contactNumber: event.senderNumber,
-          contactUuid: event.senderUuid,
-          botPhone
-        }
-      );
-
-      // Emit message to Connectome (for state tracking)
-      await this.bot.grpcClient.emitSignalMessage({
-        content: readableContent,
-        sender: event.sender,
-        senderNumber: event.senderNumber,
-        senderUuid: event.senderUuid,
-        groupId: event.groupId,
-        groupName: event.groupName,
-        botPhone,
-        timestamp: event.timestamp,
-        attachments: event.attachments,
-        mentions: event.mentions,
-        quotedMessage: event.quotedMessage
-      });
-
-      // Trigger agent activation
       if (this.bot.agent) {
         await this.agentEffector.runAgentCycle({
           streamId,
@@ -269,7 +346,7 @@ export class SignalMessageReceptor {
         console.log(`[SignalMessageReceptor:${botName}] No agent configured, skipping response`);
       }
     } catch (error: any) {
-      console.error(`[SignalMessageReceptor:${botName}] Error handling message:`, error.message);
+      console.error(`[SignalMessageReceptor:${botName}] Error running agent:`, error.message);
     }
   }
 
@@ -319,6 +396,22 @@ export class SignalMessageReceptor {
     }
 
     return undefined;
+  }
+
+  /**
+   * Check if THIS specific bot was mentioned
+   */
+  private isBotMentioned(mentions: SignalMessageEvent['mentions'], targetBotName: string): boolean {
+    if (!mentions) return false;
+
+    for (const mention of mentions) {
+      const botName = this.state.botUuidToName.get(mention.uuid);
+      if (botName === targetBotName) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**

@@ -163,26 +163,23 @@ export class SignalWebSocketReceptor {
 
   /**
    * Handle data message (regular text/media message)
+   *
+   * IMPORTANT: Forward ALL messages to the message receptor.
+   * The message receptor decides what to do with them:
+   * - Which messages to emit to Connectome (all non-`.` prefixed messages)
+   * - Which messages should trigger agent activation (mentions/quotes)
    */
   private async handleDataMessage(env: any): Promise<void> {
     const dataMessage = env.dataMessage;
     const source = env.source || env.sourceNumber;
     const sourceUuid = env.sourceUuid;
 
-    // Check if this bot is mentioned or quoted in the message
     const mentions = dataMessage.mentions || [];
     const quote = dataMessage.quote;
-    const isMentioned = this.botUuid && mentions.some((m: any) => m.uuid === this.botUuid);
-    const isQuoted = this.botUuid && quote?.authorUuid === this.botUuid;
 
-    // Skip messages from bots UNLESS this bot is mentioned or quoted
+    // Log bot messages for debugging, but forward ALL messages to handler
     if (this.isBotUuid(sourceUuid)) {
-      if (isMentioned || isQuoted) {
-        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Processing bot message (mentioned=${isMentioned}, quoted=${isQuoted})`);
-      } else {
-        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Skipping message from bot ${sourceUuid}`);
-        return;
-      }
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Forwarding bot message from ${sourceUuid} to message receptor`);
     }
 
     // Build message event

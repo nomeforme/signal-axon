@@ -44,6 +44,7 @@ export interface RuntimeConfig {
   maxBotMentionsPerConversation: number;
   maxConversationFrames: number;
   maxMemoryFrames: number;
+  groupPrivacyMode: 'opt-in' | 'opt-out';
 }
 
 /**

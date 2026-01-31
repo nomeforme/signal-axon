@@ -126,7 +126,8 @@ export class FocusedContextTransform {
         }
       }
 
-      console.log(`[FocusedContextTransform:${this.botName}] Transformed ${messages.length} messages`);
+      // Log conversation data before sending to LLM
+      this.logConversationData(messages, streamId);
 
       return {
         messages,
@@ -245,5 +246,36 @@ To mention users, use @username syntax. The system will convert usernames to Sig
         frameCount: 1
       }
     };
+  }
+
+  /**
+   * Log conversation data before sending to LLM
+   */
+  private logConversationData(messages: ContextMessage[], streamId: string): void {
+    console.log(`\n╔══════════════════════════════════════════════════════════════════════════════`);
+    console.log(`║ [FocusedContextTransform:${this.botName}] CONVERSATION DATA FOR LLM`);
+    console.log(`║ Stream: ${streamId}`);
+    console.log(`║ Total messages: ${messages.length}`);
+    console.log(`╠══════════════════════════════════════════════════════════════════════════════`);
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const roleLabel = msg.role.toUpperCase().padEnd(9);
+      const contentPreview = msg.content.length > 200
+        ? msg.content.substring(0, 200) + '...'
+        : msg.content;
+
+      // Replace newlines with visible marker for compact display
+      const displayContent = contentPreview.replace(/\n/g, ' ↵ ');
+
+      console.log(`║ [${i + 1}] ${roleLabel}: ${displayContent}`);
+
+      // Log attachment info if present
+      if (msg.metadata?.attachments && msg.metadata.attachments.length > 0) {
+        console.log(`║     └─ Attachments: ${msg.metadata.attachments.length} file(s)`);
+      }
+    }
+
+    console.log(`╚══════════════════════════════════════════════════════════════════════════════\n`);
   }
 }

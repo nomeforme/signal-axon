@@ -128,7 +128,8 @@ async function main(): Promise<void> {
       randomReplyChance: config.random_reply_chance || 0,
       maxBotMentionsPerConversation: config.max_bot_mentions_per_conversation || 3,
       maxConversationFrames: config.max_conversation_frames || 100,
-      maxMemoryFrames: 500
+      maxMemoryFrames: 500,
+      groupPrivacyMode: config.group_privacy_mode || 'opt-out'
     },
     pairedBots
   };

@@ -68,8 +68,8 @@ export class StreamManager extends EventEmitter {
       return info;
     }
 
-    // Create new stream on server
-    await this.client.ensureStream(conversationId, {
+    // Create new stream on server (pass full streamId, not conversationId)
+    await this.client.ensureStream(streamId, {
       groupName: metadata.groupName,
       participants: metadata.participants,
       botPhone: metadata.botPhone

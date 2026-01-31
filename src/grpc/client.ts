@@ -264,17 +264,18 @@ export class SignalGrpcClient extends EventEmitter {
    * Create or get a stream for a conversation
    */
   async ensureStream(
-    conversationId: string,
+    streamId: string,
     metadata?: {
       groupName?: string;
       participants?: string[];
       botPhone?: string;
     }
   ): Promise<string> {
-    const streamId = `signal:${conversationId}`;
+    // streamId should already be in correct format: signal:group:xxx or signal:dm:xxx
+    const conversationType = streamId.includes(':group:') ? 'group' : 'dm';
 
     await this.client.createStream(streamId, 'signal', {
-      conversationType: conversationId.startsWith('group:') ? 'group' : 'dm',
+      conversationType,
       groupName: metadata?.groupName || '',
       participants: JSON.stringify(metadata?.participants || []),
       botPhone: metadata?.botPhone || ''
