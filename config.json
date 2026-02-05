@@ -1,4 +1,12 @@
 {
+  "mcp_servers": [
+    {
+      "name": "everything",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"]
+    }
+  ],
   "bots": [
     {
       "name": "claude-haiku-4-5",
@@ -115,7 +123,18 @@
       "persist_history": false,
       "tools": [
         "fetch"
-      ]
+      ],
+      "mcp": ["everything"]
+    },
+    {
+      "name": "claude-opus-4-6",
+      "model": "claude-opus-4-6",
+      "prompt": "Standard",
+      "persist_history": false,
+      "tools": [
+        "fetch"
+      ],
+      "mcp": ["everything"]
     }
   ],
   "group_privacy_mode": "opt-out",

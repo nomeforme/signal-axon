@@ -10,6 +10,7 @@ import type { ToolHandler } from '../tool-loop-agent.js';
 import { AnthropicToolProvider } from '../anthropic-tool-provider.js';
 import { BedrockProvider } from '../bedrock-provider.js';
 import type { BotConfig, BotInstance } from './types.js';
+import type { MCPManager } from '@connectome/grpc-common';
 
 /**
  * Create LLM provider based on model name
@@ -46,7 +47,8 @@ function createLlmProvider(
 export function createBotInstance(
   botConfig: BotConfig,
   grpcHost: string,
-  grpcPort: number
+  grpcPort: number,
+  mcpManager?: MCPManager
 ): BotInstance {
   const botPhone = botConfig.phone!;
 
@@ -83,7 +85,14 @@ export function createBotInstance(
     const agentTools: ToolHandler[] = [];
     if (botConfig.tools?.includes('fetch')) {
       agentTools.push(createFetchTool());
-      console.log(`  ${botConfig.name}: fetch tool enabled`);
+      console.log(`  🔧 ${botConfig.name}: fetch tool enabled`);
+    }
+
+    // Add MCP tools if configured
+    if (mcpManager && botConfig.mcp && botConfig.mcp.length > 0) {
+      const mcpTools = mcpManager.getToolHandlersForServers(botConfig.mcp);
+      agentTools.push(...mcpTools);
+      console.log(`  🔌 ${botConfig.name}: ${mcpTools.length} MCP tool(s) from [${botConfig.mcp.join(', ')}]`);
     }
 
     // Pass a stub object - ToolLoopAgent stores veilStateManager but never uses it

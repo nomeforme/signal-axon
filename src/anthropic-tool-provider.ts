@@ -98,7 +98,10 @@ export class AnthropicToolProvider {
 
   constructor(config: AnthropicToolProviderConfig) {
     this.client = new Anthropic({
-      apiKey: config.apiKey
+      apiKey: config.apiKey,
+      defaultHeaders: {
+        'anthropic-beta': 'context-1m-2025-08-07'
+      }
     });
     this.defaultModel = config.defaultModel || 'claude-sonnet-4-0';
     this.defaultMaxTokens = config.defaultMaxTokens || 4096;

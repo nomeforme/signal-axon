@@ -7,6 +7,7 @@ import type { StreamManager } from './stream-manager.js';
 import type { ToolLoopAgent } from '../tool-loop-agent.js';
 import type { AnthropicToolProvider } from '../anthropic-tool-provider.js';
 import type { BedrockProvider } from '../bedrock-provider.js';
+import type { MCPServerConfig } from '@connectome/grpc-common';
 
 /**
  * Bot configuration from config.json
@@ -20,6 +21,8 @@ export interface BotConfig {
   max_tokens?: number;
   persist_history?: boolean;
   tools?: string[];
+  /** List of MCP server names this bot should use */
+  mcp?: string[];
 }
 
 /**
@@ -27,6 +30,8 @@ export interface BotConfig {
  */
 export interface SignalConfig {
   bots: BotConfig[];
+  /** Global MCP server configurations */
+  mcp_servers?: MCPServerConfig[];
   group_privacy_mode?: 'opt-in' | 'opt-out';
   random_reply_chance?: number;
   max_bot_mentions_per_conversation?: number;

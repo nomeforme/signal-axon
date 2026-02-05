@@ -42,6 +42,7 @@ import {
   type BotInstance,
   type SignalMessageEvent
 } from './grpc/index.js';
+import { MCPManager } from '@connectome/grpc-common';
 
 /**
  * Main entry point
@@ -74,6 +75,21 @@ async function main(): Promise<void> {
   }
 
   console.log();
+
+  // Initialize MCP servers (global pool)
+  const mcpManager = new MCPManager();
+  const mcpServers = (config as any).mcp_servers || [];
+
+  if (mcpServers.length > 0) {
+    console.log(`Connecting to ${mcpServers.length} MCP server(s)...`);
+    await mcpManager.connectAll(mcpServers);
+    const connectedServers = mcpManager.getConnectedServers();
+    console.log(`  Connected: ${connectedServers.join(', ') || '(none)'}`);
+    const allTools = mcpManager.getAllToolHandlers();
+    console.log(`  Total MCP tools available: ${allTools.length}`);
+    console.log();
+  }
+
   console.log(`Initializing ${pairedBots.length} bot(s)...`);
   console.log();
 
@@ -169,8 +185,8 @@ async function main(): Promise<void> {
     const botPhone = botConfig.phone!;
     console.log(`Initializing ${botConfig.name} (${botPhone})...`);
 
-    // Create bot instance
-    const bot = createBotInstance(botConfig, host, port);
+    // Create bot instance (with MCP manager for tool access)
+    const bot = createBotInstance(botConfig, host, port, mcpManager);
     state.bots.set(botPhone, bot);
 
     // Create components following Connectome nomenclature
@@ -264,6 +280,12 @@ async function main(): Promise<void> {
   // Handle shutdown
   const shutdown = async (): Promise<void> => {
     console.log('\n\nShutting down...');
+
+    // Disconnect MCP servers
+    if (mcpManager.getConnectedServers().length > 0) {
+      console.log('  Disconnecting MCP servers...');
+      await mcpManager.disconnectAll();
+    }
 
     // Stop consistency checker
     consistencyChecker.stop();
