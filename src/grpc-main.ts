@@ -204,8 +204,7 @@ async function main(): Promise<void> {
       grpcClient: bot.grpcClient,
       botName: botConfig.name,
       systemPrompt: botConfig.prompt || 'Standard',
-      maxConversationFrames: state.runtimeConfig.maxConversationFrames,
-      maxTokens: botConfig.max_tokens || 50000
+      maxConversationFrames: state.runtimeConfig.maxConversationFrames
     });
     contextTransforms.push(contextTransform);
 

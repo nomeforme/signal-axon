@@ -241,7 +241,6 @@ export class SignalGrpcClient extends EventEmitter {
     streamId: string,
     options?: {
       maxFrames?: number;
-      maxTokens?: number;
     }
   ): Promise<any> {
     if (!this.agentHandle) {
@@ -252,8 +251,7 @@ export class SignalGrpcClient extends EventEmitter {
       this.agentHandle.agentId,
       streamId,
       {
-        maxFrames: options?.maxFrames || 100,
-        maxTokens: options?.maxTokens || 50000
+        maxFrames: options?.maxFrames || 100
       }
     );
 
