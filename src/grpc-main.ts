@@ -195,7 +195,8 @@ async function main(): Promise<void> {
     const speechEffector = new SignalSpeechEffector({
       botConfig: bot.config,
       streamManager: bot.streamManager,
-      allBotNames
+      allBotNames,
+      maxMessageLength: config.max_message_length
     });
     speechEffector.setup();
 
@@ -219,7 +220,8 @@ async function main(): Promise<void> {
         botConfig: bot.config,
         grpcClient: bot.grpcClient,
         contextTransform,
-        botUuidToName: state.botUuidToName
+        botUuidToName: state.botUuidToName,
+        maxMessageLength: config.max_message_length
       });
     }
 

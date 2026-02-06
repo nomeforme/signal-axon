@@ -19,6 +19,7 @@ export interface SignalSpeechEffectorConfig {
   botConfig: BotConfig;
   streamManager: StreamManager;
   allBotNames: string[];
+  maxMessageLength?: number;
 }
 
 /**
@@ -30,11 +31,13 @@ export class SignalSpeechEffector {
   private botConfig: BotConfig;
   private streamManager: StreamManager;
   private allBotNames: string[];
+  private maxMessageLength?: number;
 
   constructor(config: SignalSpeechEffectorConfig) {
     this.botConfig = config.botConfig;
     this.streamManager = config.streamManager;
     this.allBotNames = config.allBotNames;
+    this.maxMessageLength = config.maxMessageLength;
   }
 
   /**
@@ -92,7 +95,7 @@ export class SignalSpeechEffector {
       );
 
       // Split if too long
-      const chunks = splitMessage(contentWithMentions);
+      const chunks = splitMessage(contentWithMentions, this.maxMessageLength);
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];

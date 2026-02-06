@@ -5,7 +5,7 @@
  * but we split at a smaller size for readability.
  */
 
-const DEFAULT_MAX_LENGTH = 1500;  // Conservative limit for Signal
+const DEFAULT_MAX_LENGTH = 400;  // Match Signal's practical message length
 
 /**
  * Split a long message into chunks that fit Signal's limit

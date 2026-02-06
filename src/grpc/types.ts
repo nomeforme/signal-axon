@@ -36,6 +36,7 @@ export interface SignalConfig {
   random_reply_chance?: number;
   max_bot_mentions_per_conversation?: number;
   max_conversation_frames?: number;
+  max_message_length?: number;
 }
 
 /**

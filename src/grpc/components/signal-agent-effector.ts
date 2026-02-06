@@ -26,6 +26,7 @@ export interface SignalAgentEffectorConfig {
   grpcClient: SignalGrpcClient;
   contextTransform: FocusedContextTransform;
   botUuidToName: Map<string, string>;
+  maxMessageLength?: number;
 }
 
 export interface AgentActivation {
@@ -46,6 +47,7 @@ export class SignalAgentEffector {
   private grpcClient: SignalGrpcClient;
   private contextTransform: FocusedContextTransform;
   private botUuidToName: Map<string, string>;
+  private maxMessageLength?: number;
   private processingActivations = new Set<string>();
 
   constructor(config: SignalAgentEffectorConfig) {
@@ -54,6 +56,7 @@ export class SignalAgentEffector {
     this.grpcClient = config.grpcClient;
     this.contextTransform = config.contextTransform;
     this.botUuidToName = config.botUuidToName;
+    this.maxMessageLength = config.maxMessageLength;
   }
 
   /**
@@ -148,7 +151,7 @@ export class SignalAgentEffector {
       );
 
       // Split and send
-      const chunks = splitMessage(contentWithMentions);
+      const chunks = splitMessage(contentWithMentions, this.maxMessageLength);
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
 
