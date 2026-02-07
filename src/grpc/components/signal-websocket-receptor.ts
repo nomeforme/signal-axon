@@ -18,6 +18,7 @@ import type { SignalMessageEvent, SignalAttachment, SignalMention, SignalQuote }
 // Image compression settings
 const IMAGE_MAX_DIMENSION = 1024;  // Max width or height
 const IMAGE_JPEG_QUALITY = 80;    // JPEG quality (1-100)
+const IMAGE_MAX_BYTES = 3_500_000; // Max compressed size before base64 (~4.7MB base64, under 5MB API limit)
 
 export interface SignalWebSocketReceptorConfig {
   wsUrl: string;
@@ -356,10 +357,9 @@ export class SignalWebSocketReceptor {
         return base64;
       }
 
-      // Fallback to original if compression fails
-      const base64 = buffer.toString('base64');
-      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Downloaded attachment (uncompressed): ${base64.length} bytes (base64)`);
-      return base64;
+      // Compression failed - skip rather than sending uncompressed (could exceed API limits)
+      console.warn(`[SignalWebSocketReceptor:${this.botPhone}] Compression failed, skipping attachment (${originalSize} bytes)`);
+      return null;
     } catch (error) {
       console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error downloading attachment:`, error);
       return null;
@@ -385,9 +385,9 @@ export class SignalWebSocketReceptor {
       const maxDim = Math.max(width, height);
       const needsResize = maxDim > IMAGE_MAX_DIMENSION;
 
-      // Skip compression for small images that are already JPEG
-      if (!needsResize && format === 'jpeg') {
-        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Image already optimized (${width}x${height} ${format})`);
+      // Skip compression for small JPEGs that are already under size limit
+      if (!needsResize && format === 'jpeg' && buffer.length <= IMAGE_MAX_BYTES) {
+        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Image already optimized (${width}x${height} ${format}, ${buffer.length} bytes)`);
         return buffer;
       }
 
@@ -403,11 +403,27 @@ export class SignalWebSocketReceptor {
       }
 
       // Convert to JPEG
-      const compressed = await pipeline
+      let compressed = await pipeline
         .jpeg({ quality: IMAGE_JPEG_QUALITY })
         .toBuffer();
 
-      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Compressed image: ${width}x${height} ${format} -> JPEG (${needsResize ? 'resized' : 'same size'})`);
+      // If still too large, recompress with lower quality and smaller dimensions
+      if (compressed.length > IMAGE_MAX_BYTES) {
+        console.log(`[SignalWebSocketReceptor:${this.botPhone}] First pass too large (${compressed.length} bytes), recompressing`);
+        compressed = await sharp(compressed)
+          .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 50 })
+          .toBuffer();
+      }
+      if (compressed.length > IMAGE_MAX_BYTES) {
+        console.log(`[SignalWebSocketReceptor:${this.botPhone}] Second pass still too large (${compressed.length} bytes), recompressing aggressively`);
+        compressed = await sharp(compressed)
+          .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 30 })
+          .toBuffer();
+      }
+
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Compressed image: ${width}x${height} ${format} -> JPEG ${compressed.length} bytes (${needsResize ? 'resized' : 'same size'})`);
       return compressed;
     } catch (error) {
       console.error(`[SignalWebSocketReceptor:${this.botPhone}] Image compression failed:`, error);
