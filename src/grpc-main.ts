@@ -261,9 +261,11 @@ async function main(): Promise<void> {
           await messageReceptor.handleMessage(event);
         }
       },
-      onReceipt: async (receipt) => {
-        await receiptReceptor.handleReceipt(receipt);
-      },
+      // NOTE: Do not delete - receipt handling disabled to avoid flooding connectome server
+      // onReceipt: async (receipt) => {
+      //   await receiptReceptor.handleReceipt(receipt);
+      // },
+      onReceipt: async (_receipt) => {},
       onTyping: async (typing) => {
         await typingReceptor.handleTyping(typing);
       }
