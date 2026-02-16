@@ -19,6 +19,9 @@ WORKDIR /workspace
 COPY connectome-axon-interfaces ./connectome-axon-interfaces
 COPY axon-server ./axon-server
 COPY connectome-grpc-common ./connectome-grpc-common
+COPY connectome-ts ./connectome-ts
+COPY connectome-agent-core ./connectome-agent-core
+COPY pi-mono ./pi-mono
 COPY signal-axon ./signal-axon
 
 # Build connectome-axon-interfaces
@@ -33,9 +36,17 @@ RUN npm install && npm run build
 WORKDIR /workspace/connectome-grpc-common
 RUN npm install && npm run build
 
-# Build signal-axon (standalone - does not depend on connectome-ts)
-WORKDIR /workspace/signal-axon
+# Build connectome-ts
+WORKDIR /workspace/connectome-ts
 RUN npm install && npm run build
+
+# Build connectome-agent-core (ESM, pi-agent dependency)
+WORKDIR /workspace/connectome-agent-core
+RUN npm install && npx tsc
+
+# Build signal-axon (type-check only — tsx handles CJS/ESM at runtime)
+WORKDIR /workspace/signal-axon
+RUN npm install && npx tsc --noEmit
 
 # Set working directory for runtime
 WORKDIR /workspace/signal-axon
@@ -53,5 +64,5 @@ EXPOSE 8082
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD node -e "process.exit(0)"
 
-# Run the gRPC client
-CMD ["node", "dist/grpc-main.js"]
+# Run the gRPC client via tsx (handles CJS/ESM interop)
+CMD ["npx", "tsx", "src/grpc-main.ts"]

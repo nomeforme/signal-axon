@@ -16,12 +16,12 @@ import axios from 'axios';
 import { cleanSpeechContent, splitMessage, detectAndConvertMentions, getNameToPhoneCache, convertGroupId } from '../utils/index.js';
 import { getSignalCliConfig } from '../config-loader.js';
 import type { SignalGrpcClient } from '../client.js';
-import type { ToolLoopAgent } from '../../tool-loop-agent.js';
+import { type ConnectomeAgent, renderedContextToAgentContext } from '@connectome/agent-core';
 import type { BotConfig, SignalMessageEvent } from '../types.js';
 import type { FocusedContextTransform } from './focused-context-transform.js';
 
 export interface SignalAgentEffectorConfig {
-  agent: ToolLoopAgent;
+  agent: ConnectomeAgent;
   botConfig: BotConfig;
   grpcClient: SignalGrpcClient;
   contextTransform: FocusedContextTransform;
@@ -42,7 +42,7 @@ export interface AgentActivation {
  * Constraint equivalent: EFFECTOR priority (runs after transforms to produce side effects)
  */
 export class SignalAgentEffector {
-  private agent: ToolLoopAgent;
+  private agent: ConnectomeAgent;
   private botConfig: BotConfig;
   private grpcClient: SignalGrpcClient;
   private contextTransform: FocusedContextTransform;
@@ -72,7 +72,6 @@ export class SignalAgentEffector {
   async runAgentCycle(activation: AgentActivation): Promise<boolean> {
     const { streamId, event, readableContent, activationReason } = activation;
     const botName = this.botConfig.name;
-    const activationId = `${streamId}-${Date.now()}`;
 
     // Skip if already processing this stream
     if (this.processingActivations.has(streamId)) {
@@ -80,7 +79,7 @@ export class SignalAgentEffector {
       return false;
     }
 
-    this.processingActivations.add(activationId);
+    this.processingActivations.add(streamId);
     console.log(`[SignalAgentEffector:${botName}] Running agent cycle (reason: ${activationReason})...`);
 
     try {
@@ -102,8 +101,9 @@ export class SignalAgentEffector {
       // Build stream reference
       const streamRef = { streamId, streamType: 'signal' };
 
-      // Run the tool-loop agent cycle
-      const result = await this.agent.runCycle(renderedContext as any, streamRef);
+      // Convert to pi-agent context and run the agent cycle
+      const agentContext = renderedContextToAgentContext(renderedContext);
+      const result = await this.agent.runWithContext(agentContext, streamRef);
 
       console.log(`[SignalAgentEffector:${botName}] Agent cycle completed with ${result.operations.length} operations, content length: ${result.content.length}`);
 
@@ -122,7 +122,7 @@ export class SignalAgentEffector {
 
       return false;
     } finally {
-      this.processingActivations.delete(activationId);
+      this.processingActivations.delete(streamId);
     }
   }
 
