@@ -131,9 +131,10 @@ export class SignalGrpcClient extends EventEmitter {
     metadata?: Record<string, any>;
   }): Promise<{ success: boolean; sequence: number }> {
     // Create stream ID from conversation context
+    // Must match signal-message-receptor: DMs include botPhone to isolate per-bot conversations
     const streamId = message.groupId
       ? `signal:group:${message.groupId}`
-      : `signal:dm:${message.senderNumber || message.senderUuid}`;
+      : `signal:dm:${message.botPhone}:${message.senderNumber || message.senderUuid}`;
 
     const result = await this.client.emitEvent(
       'signal:message',

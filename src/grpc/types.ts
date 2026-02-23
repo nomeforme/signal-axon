@@ -16,6 +16,8 @@ export interface BotConfig {
   uuid?: string;
   model?: string;
   prompt?: string;
+  /** Skip the platform identity text in system prompt (bot gets only the custom prompt, or nothing if prompt is "Standard") */
+  skip_identity_prompt?: boolean;
   max_tokens?: number;
   persist_history?: boolean;
   tools?: string[];
@@ -23,6 +25,18 @@ export interface BotConfig {
   mcp?: string[];
   /** Enable prompt caching (default true). Set false for bedrock cross-region models. */
   prompt_caching?: boolean;
+  /** Paths to skill directories to load */
+  skill_paths?: string[];
+  /** RLM (recursive sub-agent) configuration */
+  rlm?: {
+    maxDepth?: number;
+    maxCalls?: number;
+    budget?: number;
+    timeoutSeconds?: number;
+    model?: string;
+    childModel?: string;
+    cwd?: string;
+  };
 }
 
 /**

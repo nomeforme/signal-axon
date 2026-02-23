@@ -13,6 +13,7 @@
       "model": "claude-haiku-4-5-20251001",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "tools": [
         "fetch"
       ]
@@ -22,6 +23,7 @@
       "model": "claude-sonnet-4-5-20250929",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "tools": [
         "fetch"
       ]
@@ -31,6 +33,7 @@
       "model": "claude-opus-4-20250514",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "tools": [
         "fetch"
       ]
@@ -40,6 +43,7 @@
       "model": "claude-opus-4-1-20250805",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "tools": [
         "fetch"
       ]
@@ -49,34 +53,38 @@
       "model": "claude-sonnet-4-20250514",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "tools": [
         "fetch"
       ]
     },
     {
       "name": "claude-3-5-haiku",
-      "model": "claude-3-5-haiku-20241022",
+      "model": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
       "prompt": "Standard",
       "persist_history": false,
-      "tools": [
-        "fetch"
-      ]
-    },
-    {
-      "name": "claude-3-opus",
-      "model": "us.anthropic.claude-3-opus-20240229-v1:0",
-      "prompt": "Standard",
-      "persist_history": false,
+      "max_tokens": 1024,
       "prompt_caching": false,
       "tools": [
         "fetch"
       ]
     },
     {
-      "name": "claude-3-7-sonnet",
-      "model": "claude-3-7-sonnet-20250219",
+      "name": "claude-3-opus",
+      "model": "claude-3-opus-20240229",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
+      "tools": [],
+      "skip_identity_prompt": false
+    },
+    {
+      "name": "claude-3-7-sonnet",
+      "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+      "prompt": "Standard",
+      "persist_history": false,
+      "max_tokens": 1024,
+      "prompt_caching": false,
       "tools": [
         "fetch"
       ]
@@ -86,6 +94,7 @@
       "model": "claude-3-haiku-20240307",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "tools": [
         "fetch"
       ]
@@ -95,6 +104,7 @@
       "model": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "prompt_caching": false,
       "tools": [
         "fetch"
@@ -105,6 +115,7 @@
       "model": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "prompt_caching": false,
       "tools": [
         "fetch"
@@ -115,6 +126,7 @@
       "model": "us.anthropic.claude-3-sonnet-20240229-v1:0",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "prompt_caching": false,
       "tools": [
         "fetch"
@@ -125,6 +137,7 @@
       "model": "claude-opus-4-5-20251101",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "tools": [
         "fetch"
       ],
@@ -135,10 +148,30 @@
       "model": "claude-opus-4-6",
       "prompt": "Standard",
       "persist_history": false,
+      "max_tokens": 1024,
       "tools": [
         "fetch"
       ],
-      "mcp": ["everything"]
+      "mcp": ["everything"],
+      "skill_paths": [
+        "/workspace/skills/connectome-ontology",
+        "/workspace/pi-skills/brave-search"
+      ],
+      "rlm": {
+        "maxDepth": 2,
+        "maxCalls": 10,
+        "timeoutSeconds": 300
+      }
+    },
+    {
+      "name": "claude-sonnet-4-6",
+      "model": "claude-sonnet-4-6",
+      "prompt": "Standard",
+      "persist_history": false,
+      "max_tokens": 1024,
+      "tools": [
+        "fetch"
+      ]
     }
   ],
   "group_privacy_mode": "opt-out",

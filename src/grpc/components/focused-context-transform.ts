@@ -44,6 +44,7 @@ export interface FocusedContextTransformConfig {
   botName: string;
   systemPrompt: string;
   maxConversationFrames: number;
+  skipIdentityPrompt?: boolean;
 }
 
 /**
@@ -56,12 +57,14 @@ export class FocusedContextTransform {
   private botName: string;
   private systemPrompt: string;
   private maxConversationFrames: number;
+  private skipIdentityPrompt: boolean;
 
   constructor(config: FocusedContextTransformConfig) {
     this.grpcClient = config.grpcClient;
     this.botName = config.botName;
     this.systemPrompt = config.systemPrompt;
     this.maxConversationFrames = config.maxConversationFrames;
+    this.skipIdentityPrompt = config.skipIdentityPrompt ?? false;
   }
 
   /**
@@ -192,7 +195,7 @@ export class FocusedContextTransform {
    * Build system prompt with bot identity and Signal capabilities
    */
   private buildSystemPrompt(): string {
-    const identityPrompt = `You are <${this.botName}> in Signal messenger.
+    const identityPrompt = this.skipIdentityPrompt ? '' : `You are <${this.botName}> in Signal messenger.
 
 To mention users, use @username syntax. The system will convert usernames to Signal mention format automatically.
 
@@ -203,7 +206,10 @@ Signal supports these text formatting options:
 - \`monospace\` for monospace`;
 
     if (this.systemPrompt && this.systemPrompt !== 'Standard') {
-      return `${this.systemPrompt}\n\n${identityPrompt}`;
+      if (identityPrompt) {
+        return `${this.systemPrompt}\n\n${identityPrompt}`;
+      }
+      return this.systemPrompt;
     }
 
     return identityPrompt;

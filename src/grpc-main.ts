@@ -205,7 +205,8 @@ async function main(): Promise<void> {
       grpcClient: bot.grpcClient,
       botName: botConfig.name,
       systemPrompt: botConfig.prompt || 'Standard',
-      maxConversationFrames: state.runtimeConfig.maxConversationFrames
+      maxConversationFrames: state.runtimeConfig.maxConversationFrames,
+      skipIdentityPrompt: botConfig.skip_identity_prompt,
     });
     contextTransforms.push(contextTransform);
 
