@@ -20,7 +20,7 @@ import type { SignalCommandEffector } from './signal-command-effector.js';
 export interface SignalMessageReceptorConfig {
   bot: BotInstance;
   state: SharedState;
-  agentEffector: SignalAgentEffector;
+  agentEffector?: SignalAgentEffector;
   commandEffector: SignalCommandEffector;
   updateConfig: (updates: Partial<RuntimeConfig>) => void;
 }
@@ -33,7 +33,7 @@ export interface SignalMessageReceptorConfig {
 export class SignalMessageReceptor {
   private bot: BotInstance;
   private state: SharedState;
-  private agentEffector: SignalAgentEffector;
+  private agentEffector?: SignalAgentEffector;
   private commandEffector: SignalCommandEffector;
   private updateConfig: (updates: Partial<RuntimeConfig>) => void;
 
@@ -405,7 +405,8 @@ export class SignalMessageReceptor {
 
     // Trigger agent activation
     try {
-      if (this.bot.agent) {
+      if (this.agentEffector) {
+        // Local bot — run agent in-process
         await this.agentEffector.runAgentCycle({
           streamId,
           event,
@@ -413,7 +414,28 @@ export class SignalMessageReceptor {
           activationReason
         });
       } else {
-        console.log(`[SignalMessageReceptor:${botName}] No agent configured, skipping response`);
+        // Remote bot — ensure this bot's stream manager is subscribed so its
+        // speech effector receives the reply (the emit lottery winner may be a different bot)
+        const botPhone = this.bot.config.phone!;
+        await this.bot.streamManager.getOrCreateStream(
+          event.groupId || event.senderNumber || event.senderUuid || 'unknown',
+          {
+            conversationType: event.groupId ? 'group' : 'dm',
+            groupId: event.groupId,
+            groupName: event.groupName,
+            contactNumber: event.senderNumber,
+            contactUuid: event.senderUuid,
+            botPhone
+          }
+        );
+
+        // Trigger server-side activation via gRPC
+        await this.bot.grpcClient.activateAgent(streamId, activationReason, {
+          messageContent: readableContent,
+          authorName: event.sender,
+          streamType: 'signal'
+        });
+        console.log(`[SignalMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
       }
     } catch (error: any) {
       console.error(`[SignalMessageReceptor:${botName}] Error running agent:`, error.message);

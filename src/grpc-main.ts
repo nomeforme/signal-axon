@@ -167,6 +167,7 @@ async function main(): Promise<void> {
 
   // Initialize each bot
   const allBotNames = pairedBots.map(b => b.name);
+  const remoteBotNames = pairedBots.filter(b => b.remote).map(b => b.name);
   const allBotPhones = pairedBots.map(b => b.phone!);
   const wsHandlersMap = new Map<string, SignalWebSocketReceptor>();
   const messageHandlersMap = new Map<string, (event: SignalMessageEvent) => Promise<void>>();
@@ -196,6 +197,7 @@ async function main(): Promise<void> {
       botConfig: bot.config,
       streamManager: bot.streamManager,
       allBotNames,
+      remoteBotNames,
       maxMessageLength: config.max_message_length
     });
     speechEffector.setup();
@@ -227,18 +229,14 @@ async function main(): Promise<void> {
     }
 
     // 5. SignalMessageReceptor - handles Signal messages
-    let messageReceptor: SignalMessageReceptor | undefined;
-    if (agentEffector) {
-      messageReceptor = new SignalMessageReceptor({
-        bot,
-        state,
-        agentEffector,
-        commandEffector,
-        updateConfig: updateRuntimeConfig
-      });
-    } else {
-      console.warn(`  ${botConfig.name}: No agent configured, message handling disabled`);
-    }
+    //    Always created: remote bots still need emission + gRPC activation
+    const messageReceptor = new SignalMessageReceptor({
+      bot,
+      state,
+      agentEffector,   // undefined for remote bots — triggers gRPC activation path
+      commandEffector,
+      updateConfig: updateRuntimeConfig
+    });
 
     // 6. SignalReceiptReceptor - handles receipts
     const receiptReceptor = new SignalReceiptReceptor({ bot });
@@ -258,9 +256,7 @@ async function main(): Promise<void> {
         // This allows the checker to track which bots received each message
         consistencyChecker.recordMessage(event, botPhone);
 
-        if (messageReceptor) {
-          await messageReceptor.handleMessage(event);
-        }
+        await messageReceptor.handleMessage(event);
       },
       // NOTE: Do not delete - receipt handling disabled to avoid flooding connectome server
       // onReceipt: async (receipt) => {
@@ -274,9 +270,7 @@ async function main(): Promise<void> {
 
     // Store for consistency checker and shutdown
     wsHandlersMap.set(botPhone, wsReceptor);
-    if (messageReceptor) {
-      messageHandlersMap.set(botPhone, (event) => messageReceptor.handleMessage(event));
-    }
+    messageHandlersMap.set(botPhone, (event) => messageReceptor.handleMessage(event));
 
     console.log(`  ${botConfig.name}: Components initialized`);
   }

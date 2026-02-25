@@ -67,11 +67,11 @@ async function main(): Promise<void> {
   // In development: src/axon-modules
   // In production (compiled): dist/axon-modules -> need to use src still for TS files
   const isDevelopment = process.env.NODE_ENV !== 'production';
-  const isCompiledContext = __dirname.includes('dist');
+  const isCompiledContext = import.meta.dirname.includes('dist');
 
   const modulesDir = isCompiledContext
-    ? join(__dirname, '..', 'src', 'axon-modules')  // dist/ -> ../src/axon-modules
-    : join(__dirname, 'axon-modules');              // src/ -> axon-modules
+    ? join(import.meta.dirname, '..', 'src', 'axon-modules')  // dist/ -> ../src/axon-modules
+    : join(import.meta.dirname, 'axon-modules');              // src/ -> axon-modules
 
   console.log(`Module registration - isDev: ${isDevelopment}, modulesDir: ${modulesDir}`);
 

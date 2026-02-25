@@ -314,7 +314,8 @@ export class SignalGrpcClient extends EventEmitter {
    */
   async activateAgent(
     streamId: string,
-    reason?: string
+    reason?: string,
+    metadata?: Record<string, string>
   ): Promise<{ success: boolean; activationId: string }> {
     if (!this.agentHandle) {
       throw new Error('Not connected - call connect() first');
@@ -325,7 +326,8 @@ export class SignalGrpcClient extends EventEmitter {
       streamId,
       {
         reason: reason || 'signal message received',
-        priority: 'normal'
+        priority: 'normal',
+        metadata
       }
     );
 

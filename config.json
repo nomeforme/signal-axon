@@ -153,6 +153,7 @@
         "fetch"
       ],
       "mcp": ["everything"],
+      "remote": true,
       "skill_paths": [
         "/workspace/skills/connectome-ontology",
         "/workspace/pi-skills/brave-search"

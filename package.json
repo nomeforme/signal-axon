@@ -2,13 +2,20 @@
   "name": "signal-axon",
   "version": "0.1.0",
   "description": "Signal messenger AXON module for Connectome - bridges Signal CLI REST API to Connectome events and facets",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc --watch",
-    "clean": "rm -rf dist",
+    "build": "tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit",
+    "watch": "tsc --watch",
     "start": "tsx src/grpc-main.ts",
     "start:dev": "nodemon --watch src --exec tsx src/grpc-main.ts",
     "start:axon": "tsx src/axon-main.ts"
@@ -25,10 +32,10 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@connectome/agent-core": "file:../connectome-agent-core",
-    "@connectome/axon-interfaces": "file:../connectome-axon-interfaces",
-    "@connectome/axon-server": "file:../axon-server",
-    "@connectome/grpc-common": "file:../connectome-grpc-common",
+    "@connectome/agent-core": "workspace:*",
+    "@connectome/axon-interfaces": "workspace:*",
+    "@connectome/axon-server": "workspace:*",
+    "@connectome/grpc-common": "workspace:*",
     "@mariozechner/pi-ai": "^0.52.9",
     "@mariozechner/pi-agent-core": "^0.52.9",
     "@sinclair/typebox": "^0.34.41",

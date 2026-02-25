@@ -19,6 +19,7 @@ export interface SignalSpeechEffectorConfig {
   botConfig: BotConfig;
   streamManager: StreamManager;
   allBotNames: string[];
+  remoteBotNames: string[];
   maxMessageLength?: number;
 }
 
@@ -31,12 +32,14 @@ export class SignalSpeechEffector {
   private botConfig: BotConfig;
   private streamManager: StreamManager;
   private allBotNames: string[];
+  private remoteBotNames: string[];
   private maxMessageLength?: number;
 
   constructor(config: SignalSpeechEffectorConfig) {
     this.botConfig = config.botConfig;
     this.streamManager = config.streamManager;
     this.allBotNames = config.allBotNames;
+    this.remoteBotNames = config.remoteBotNames;
     this.maxMessageLength = config.maxMessageLength;
   }
 
@@ -71,15 +74,22 @@ export class SignalSpeechEffector {
     const botName = this.botConfig.name;
     const botPhone = this.botConfig.phone!;
 
-    // Skip speech from any bot in our system - they all send directly to Signal
-    const isFromOurBot = this.allBotNames.includes(facet.agentId || '') ||
-                         this.allBotNames.includes(facet.agentName || '');
-    if (isFromOurBot) {
-      console.log(`[SignalSpeechEffector:${botName}] Skipping speech from our bot ${facet.agentName || facet.agentId}`);
+    // Determine speaker identity
+    const speakerName = facet.agentName || facet.agentId || '';
+    const isFromOurBot = this.allBotNames.includes(speakerName) || this.allBotNames.includes(facet.agentId || '') || this.allBotNames.includes(facet.agentName || '');
+    const isRemote = this.remoteBotNames.includes(speakerName) || this.remoteBotNames.includes(facet.agentId || '') || this.remoteBotNames.includes(facet.agentName || '');
+
+    // Skip speech from LOCAL bots (they send directly to Signal via agent effector)
+    if (isFromOurBot && !isRemote) {
       return;
     }
 
-    console.log(`[SignalSpeechEffector:${botName}] Sending message to ${streamInfo.groupName || streamInfo.contactNumber || streamInfo.streamId}`);
+    // For remote bot speech, only THIS bot's effector should deliver (avoid duplicates from other bots)
+    if (isRemote && speakerName !== botName && facet.agentName !== botName) {
+      return;
+    }
+
+    console.log(`[SignalSpeechEffector:${botName}] Sending message to ${streamInfo.groupName || streamInfo.contactNumber || streamInfo.streamId}${isRemote ? ` (remote bot: ${speakerName})` : ''}`);
 
     try {
       // Clean speech content (strip XML tags, extract tool syntax)

@@ -27,6 +27,8 @@ export interface BotConfig {
   prompt_caching?: boolean;
   /** Paths to skill directories to load */
   skill_paths?: string[];
+  /** Remote mode: signal-axon keeps Signal connection but delegates cognition to external bot-runtime */
+  remote?: boolean;
   /** RLM (recursive sub-agent) configuration */
   rlm?: {
     maxDepth?: number;
