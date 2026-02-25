@@ -433,7 +433,8 @@ export class SignalMessageReceptor {
         await this.bot.grpcClient.activateAgent(streamId, activationReason, {
           messageContent: readableContent,
           authorName: event.sender,
-          streamType: 'signal'
+          streamType: 'signal',
+          targetBot: botName
         });
         console.log(`[SignalMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
       }

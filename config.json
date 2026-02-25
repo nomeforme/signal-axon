@@ -14,9 +14,8 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-sonnet-4-5",
@@ -24,9 +23,8 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-opus-4",
@@ -34,9 +32,8 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-opus-4-1",
@@ -44,9 +41,8 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-sonnet-4",
@@ -54,9 +50,8 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-3-5-haiku",
@@ -65,9 +60,8 @@
       "persist_history": false,
       "max_tokens": 1024,
       "prompt_caching": false,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-3-opus",
@@ -76,7 +70,8 @@
       "persist_history": false,
       "max_tokens": 1024,
       "tools": [],
-      "skip_identity_prompt": false
+      "skip_identity_prompt": false,
+      "remote": true
     },
     {
       "name": "claude-3-7-sonnet",
@@ -85,9 +80,8 @@
       "persist_history": false,
       "max_tokens": 1024,
       "prompt_caching": false,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-3-haiku",
@@ -95,9 +89,8 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-3-5-sonnet",
@@ -106,9 +99,8 @@
       "persist_history": false,
       "max_tokens": 1024,
       "prompt_caching": false,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-3-6-sonnet",
@@ -117,9 +109,8 @@
       "persist_history": false,
       "max_tokens": 1024,
       "prompt_caching": false,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-3-sonnet",
@@ -128,9 +119,8 @@
       "persist_history": false,
       "max_tokens": 1024,
       "prompt_caching": false,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     },
     {
       "name": "claude-opus-4-5",
@@ -138,10 +128,9 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ],
-      "mcp": ["everything"]
+      "tools": ["fetch"],
+      "mcp": ["everything"],
+      "remote": true
     },
     {
       "name": "claude-opus-4-6",
@@ -149,9 +138,7 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ],
+      "tools": ["fetch"],
       "mcp": ["everything"],
       "remote": true,
       "skill_paths": [
@@ -170,9 +157,8 @@
       "prompt": "Standard",
       "persist_history": false,
       "max_tokens": 1024,
-      "tools": [
-        "fetch"
-      ]
+      "tools": ["fetch"],
+      "remote": true
     }
   ],
   "group_privacy_mode": "opt-out",
