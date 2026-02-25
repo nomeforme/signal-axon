@@ -29,7 +29,6 @@ import {
   SignalReceiptReceptor,
   SignalTypingReceptor,
   FocusedContextTransform,
-  SignalAgentEffector,
   SignalSpeechEffector,
   SignalCommandEffector,
   MessageConsistencyChecker,
@@ -42,7 +41,6 @@ import {
   type BotInstance,
   type SignalMessageEvent
 } from './grpc/index.js';
-import { MCPManager } from '@connectome/grpc-common';
 
 /**
  * Main entry point
@@ -75,20 +73,6 @@ async function main(): Promise<void> {
   }
 
   console.log();
-
-  // Initialize MCP servers (global pool)
-  const mcpManager = new MCPManager();
-  const mcpServers = (config as any).mcp_servers || [];
-
-  if (mcpServers.length > 0) {
-    console.log(`Connecting to ${mcpServers.length} MCP server(s)...`);
-    await mcpManager.connectAll(mcpServers);
-    const connectedServers = mcpManager.getConnectedServers();
-    console.log(`  Connected: ${connectedServers.join(', ') || '(none)'}`);
-    const allTools = mcpManager.getAllToolHandlers();
-    console.log(`  Total MCP tools available: ${allTools.length}`);
-    console.log();
-  }
 
   console.log(`Initializing ${pairedBots.length} bot(s)...`);
   console.log();
@@ -186,8 +170,8 @@ async function main(): Promise<void> {
     const botPhone = botConfig.phone!;
     console.log(`Initializing ${botConfig.name} (${botPhone})...`);
 
-    // Create bot instance (with MCP manager for tool access)
-    const bot = createBotInstance(botConfig, host, port, mcpManager);
+    // Create bot instance
+    const bot = createBotInstance(botConfig, host, port);
     state.bots.set(botPhone, bot);
 
     // Create components following Connectome nomenclature
@@ -215,36 +199,21 @@ async function main(): Promise<void> {
     // 3. SignalCommandEffector - handles ! commands
     const commandEffector = new SignalCommandEffector(botConfig.name);
 
-    // 4. SignalAgentEffector - runs agent and sends responses
-    let agentEffector: SignalAgentEffector | undefined;
-    if (bot.agent) {
-      agentEffector = new SignalAgentEffector({
-        agent: bot.agent,
-        botConfig: bot.config,
-        grpcClient: bot.grpcClient,
-        contextTransform,
-        botUuidToName: state.botUuidToName,
-        maxMessageLength: config.max_message_length
-      });
-    }
-
-    // 5. SignalMessageReceptor - handles Signal messages
-    //    Always created: remote bots still need emission + gRPC activation
+    // 4. SignalMessageReceptor - handles Signal messages and triggers remote gRPC activation
     const messageReceptor = new SignalMessageReceptor({
       bot,
       state,
-      agentEffector,   // undefined for remote bots — triggers gRPC activation path
       commandEffector,
       updateConfig: updateRuntimeConfig
     });
 
-    // 6. SignalReceiptReceptor - handles receipts
+    // 5. SignalReceiptReceptor - handles receipts
     const receiptReceptor = new SignalReceiptReceptor({ bot });
 
-    // 7. SignalTypingReceptor - handles typing indicators
+    // 6. SignalTypingReceptor - handles typing indicators
     const typingReceptor = new SignalTypingReceptor({ bot });
 
-    // 8. SignalWebSocketReceptor - handles WebSocket connection to Signal CLI
+    // 7. SignalWebSocketReceptor - handles WebSocket connection to Signal CLI
     const wsReceptor = new SignalWebSocketReceptor({
       wsUrl,
       httpUrl: apiUrl,  // HTTP base URL for downloading attachments
@@ -278,12 +247,6 @@ async function main(): Promise<void> {
   // Handle shutdown
   const shutdown = async (): Promise<void> => {
     console.log('\n\nShutting down...');
-
-    // Disconnect MCP servers
-    if (mcpManager.getConnectedServers().length > 0) {
-      console.log('  Disconnecting MCP servers...');
-      await mcpManager.disconnectAll();
-    }
 
     // Stop consistency checker
     consistencyChecker.stop();

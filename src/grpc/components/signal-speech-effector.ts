@@ -5,8 +5,8 @@
  * and sends them to Signal:
  * - Speech facets → Signal messages
  *
- * This handles server-initiated output (vs SignalAgentEffector which
- * handles client-side agent execution).
+ * Cognition is handled by remote bot-runtime containers; this effector
+ * receives their output via gRPC subscriptions and delivers it to Signal.
  */
 
 import axios from 'axios';

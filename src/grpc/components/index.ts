@@ -27,10 +27,7 @@ export type { SignalTypingReceptorConfig } from './signal-typing-receptor.js';
 export { FocusedContextTransform } from './focused-context-transform.js';
 export type { FocusedContextTransformConfig, RenderedContext, ContextMessage } from './focused-context-transform.js';
 
-// Effectors - Run agents and send responses
-export { SignalAgentEffector } from './signal-agent-effector.js';
-export type { SignalAgentEffectorConfig, AgentActivation } from './signal-agent-effector.js';
-
+// Effectors - Send responses to Signal
 export { SignalSpeechEffector } from './signal-speech-effector.js';
 export type { SignalSpeechEffectorConfig } from './signal-speech-effector.js';
 

@@ -4,7 +4,6 @@
 
 import type { SignalGrpcClient } from './client.js';
 import type { StreamManager } from './stream-manager.js';
-import type { ConnectomeAgent } from '@connectome/agent-core';
 import type { MCPServerConfig } from '@connectome/grpc-common';
 
 /**
@@ -73,7 +72,6 @@ export interface BotInstance {
   config: BotConfig;
   grpcClient: SignalGrpcClient;
   streamManager: StreamManager;
-  agent?: ConnectomeAgent;
 }
 
 /**
