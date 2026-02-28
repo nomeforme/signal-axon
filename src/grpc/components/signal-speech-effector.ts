@@ -94,7 +94,7 @@ export class SignalSpeechEffector {
     try {
       // Clean speech content (strip XML tags, extract tool syntax)
       const cleanedContent = cleanSpeechContent(facet.content || '');
-      if (!cleanedContent) return;
+      if (!cleanedContent && !facet.attachments?.length) return;
 
       const { apiUrl } = getSignalCliConfig();
 
@@ -104,8 +104,19 @@ export class SignalSpeechEffector {
         getNameToPhoneCache()
       );
 
-      // Split if too long
-      const chunks = splitMessage(contentWithMentions, this.maxMessageLength);
+      // Build base64 attachments array from facet
+      const base64Attachments: string[] = [];
+      if (facet.attachments?.length) {
+        for (const att of facet.attachments) {
+          const b64 = att.data instanceof Uint8Array
+            ? Buffer.from(att.data).toString('base64')
+            : att.data;  // already base64
+          base64Attachments.push(b64);
+        }
+      }
+
+      // Split if too long — ensure at least one chunk for attachment-only messages
+      const chunks = contentWithMentions ? splitMessage(contentWithMentions, this.maxMessageLength) : (base64Attachments.length > 0 ? [''] : []);
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
@@ -119,6 +130,11 @@ export class SignalSpeechEffector {
         // Only include mentions in the first chunk
         if (i === 0 && mentions.length > 0) {
           body.mentions = mentions;
+        }
+
+        // Only include attachments in the first chunk
+        if (i === 0 && base64Attachments.length > 0) {
+          body.base64_attachments = base64Attachments;
         }
 
         // Determine recipient
