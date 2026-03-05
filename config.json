@@ -14,7 +14,8 @@
     { "name": "claude-3-sonnet", "remote": true },
     { "name": "claude-opus-4-5", "remote": true },
     { "name": "claude-opus-4-6", "remote": true },
-    { "name": "claude-sonnet-4-6", "remote": true }
+    { "name": "claude-sonnet-4-6", "remote": true },
+    { "name": "ari", "remote": true, "skip_identity_prompt": true }
   ],
   "group_privacy_mode": "opt-out",
   "random_reply_chance": 200,
