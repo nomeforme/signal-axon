@@ -49,6 +49,8 @@ export interface SharedState {
   bots: Map<string, BotInstance>;
   /** Map from bot UUID to bot name (populated from signal-cli) */
   botUuidToName: Map<string, string>;
+  /** Map from any UUID to display name (bots + humans, for mention resolution) */
+  uuidToName: Map<string, string>;
   /** Map from bot phone to bot name */
   botPhoneToName: Map<string, string>;
   /** Track activations currently being processed (dedup) */

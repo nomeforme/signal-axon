@@ -92,6 +92,7 @@ async function main(): Promise<void> {
   const state: SharedState = {
     bots: new Map<string, BotInstance>(),
     botUuidToName,
+    uuidToName: new Map<string, string>(),
     botPhoneToName: phoneToName,
     processingActivations: new Set<string>(),
     botInteractionCounts: new Map<string, number>(),
@@ -161,6 +162,7 @@ async function main(): Promise<void> {
     nameToPhoneCache.set(name.toLowerCase(), phone);
     if (uuid) {
       botUuidToName.set(uuid, name);
+      state.uuidToName.set(uuid, name);
       nameToUuidCache.set(name.toLowerCase(), uuid);
     }
 

@@ -154,15 +154,17 @@ export class SignalMessageReceptor {
     }
 
     // Cache sender UUID → name for mention resolution (covers non-bot users too)
+    // Uses uuidToName (general map), NOT botUuidToName (bot-only, used for isSenderBot check)
     if (event.senderUuid && event.sender) {
-      this.state.botUuidToName.set(event.senderUuid, event.sender);
+      this.state.uuidToName.set(event.senderUuid, event.sender);
     }
 
     // Replace mention placeholders with @name for readable content
+    // Use uuidToName (has both bots and humans) for broadest resolution
     const readableContent = replaceMentionPlaceholders(
       processedContent,
       event.mentions,
-      this.state.botUuidToName
+      this.state.uuidToName
     );
 
     // Build message ID for deduplication
