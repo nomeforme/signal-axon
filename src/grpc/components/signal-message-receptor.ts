@@ -153,6 +153,11 @@ export class SignalMessageReceptor {
       }
     }
 
+    // Cache sender UUID → name for mention resolution (covers non-bot users too)
+    if (event.senderUuid && event.sender) {
+      this.state.botUuidToName.set(event.senderUuid, event.sender);
+    }
+
     // Replace mention placeholders with @name for readable content
     const readableContent = replaceMentionPlaceholders(
       processedContent,
