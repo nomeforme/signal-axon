@@ -34,6 +34,7 @@
     "@connectome/axon-interfaces": "workspace:*",
     "@connectome/axon-server": "workspace:*",
     "@connectome/grpc-common": "workspace:*",
+    "@connectome/axon-binding": "workspace:*",
     "@sinclair/typebox": "^0.34.41",
     "axios": "^1.6.0",
     "dotenv": "^16.4.0",

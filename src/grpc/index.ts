@@ -10,7 +10,7 @@ export { StreamManager, type StreamInfo } from './stream-manager.js';
 export * from './types.js';
 
 // Configuration
-export { loadConfig, pairPhonesWithBots, getGrpcConfig, getSignalCliConfig, loadBotUuids } from './config-loader.js';
+export { getPhones, getGrpcConfig, getSignalCliConfig, getOperationalConfig, discoverBotUuid, discoverBotUuids, discoverBotNames } from './config-loader.js';
 
 // Bot instance management
 export { createBotInstance } from './bot-instance.js';

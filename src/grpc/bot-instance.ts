@@ -11,7 +11,9 @@ import { StreamManager } from './stream-manager.js';
 import type { BotConfig, BotInstance } from './types.js';
 
 /**
- * Create a bot instance (without connecting)
+ * Create a bot instance from discovered identity
+ *
+ * Name is discovered from signal-cli or SIGNAL_BOT_NAMES env, not from static config.
  */
 export function createBotInstance(
   botConfig: BotConfig,
@@ -31,17 +33,14 @@ export function createBotInstance(
   // Create stream manager for this bot
   const streamManager = new StreamManager(grpcClient);
 
-  // Create the instance
   const botInstance: BotInstance = {
     config: botConfig,
     grpcClient,
     streamManager
   };
 
-  // Remote bots delegate cognition to external bot-runtime — skip agent creation
-  if (botConfig.remote) {
-    console.log(`  ${botConfig.name}: Remote mode — cognition delegated to bot-runtime`);
-  }
+  // Remote bots delegate cognition to external bot-runtime
+  console.log(`  ${botConfig.name}: Remote mode — cognition delegated to bot-runtime`);
 
   return botInstance;
 }

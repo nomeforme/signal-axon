@@ -1,22 +1,27 @@
 /**
- * Configuration loader for Signal AXON gRPC mode
+ * Configuration loading for Signal AXON gRPC mode
+ *
+ * No static config.json — bot identities discovered from signal-cli.
+ * Phone numbers from env vars or axon binding, names from signal-cli profile data,
+ * UUIDs discovered via signal-cli REST API.
  */
 
-import fs from 'fs';
-import path from 'path';
-import type { SignalConfig, BotConfig } from './types.js';
+import axios from 'axios';
 
 /**
- * Load configuration from file
+ * Parse bot phone numbers from environment
  */
-export function loadConfig(): SignalConfig {
-  try {
-    const configPath = path.join(process.cwd(), 'config.json');
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (err: any) {
-    console.error('Error loading config.json:', err.message);
-    process.exit(1);
+export function getPhones(): string[] {
+  const phonesEnv = process.env.BOT_PHONE_NUMBERS || '';
+  const phones = phonesEnv.split(',').map(p => p.trim()).filter(p => p);
+
+  if (phones.length === 0) {
+    console.log('No BOT_PHONE_NUMBERS set — bots will arrive via axon binding');
+  } else {
+    console.log(`Found ${phones.length} phone(s) in BOT_PHONE_NUMBERS`);
   }
+
+  return phones;
 }
 
 /**
@@ -39,61 +44,138 @@ export function getSignalCliConfig(): { wsUrl: string; apiUrl: string } {
 }
 
 /**
- * Pair phone numbers with bot configurations by index
+ * Parse operational config from environment with defaults
  */
-export function pairPhonesWithBots(config: SignalConfig): BotConfig[] {
-  const botPhoneNumbersEnv = process.env.BOT_PHONE_NUMBERS || '';
-  const botPhones = botPhoneNumbersEnv.split(',').map(p => p.trim()).filter(p => p);
-
-  if (botPhones.length === 0) {
-    console.error('Error: BOT_PHONE_NUMBERS environment variable not set');
-    return [];
-  }
-
-  const pairedBots: BotConfig[] = [];
-
-  for (let i = 0; i < Math.min(botPhones.length, config.bots.length); i++) {
-    const botConfig = config.bots[i];
-    pairedBots.push({
-      ...botConfig,
-      phone: botPhones[i]
-    });
-    console.log(`  Paired: ${botConfig.name} → ${botPhones[i]}`);
-  }
-
-  return pairedBots;
+export function getOperationalConfig(): {
+  randomReplyChance: number;
+  maxBotMentionsPerConversation: number;
+  maxConversationFrames: number;
+  maxMemoryFrames: number;
+  maxMessageLength: number;
+  groupPrivacyMode: 'opt-in' | 'opt-out';
+} {
+  const mode = process.env.GROUP_PRIVACY_MODE;
+  return {
+    randomReplyChance: parseInt(process.env.RANDOM_REPLY_CHANCE || '200') || 0,
+    maxBotMentionsPerConversation: parseInt(process.env.MAX_BOT_MENTIONS || '1') || 1,
+    maxConversationFrames: parseInt(process.env.MAX_CONVERSATION_FRAMES || '100') || 100,
+    maxMemoryFrames: 500,
+    maxMessageLength: parseInt(process.env.MAX_MESSAGE_LENGTH || '400') || 400,
+    groupPrivacyMode: (mode === 'opt-in' ? 'opt-in' : 'opt-out'),
+  };
 }
 
 /**
- * Load bot UUIDs from Signal CLI accounts.json
+ * Discover a bot's UUID via the signal-cli REST API.
+ * Queries GET /v1/identities/{phone} and finds the self-identity entry.
  */
-export function loadBotUuids(
-  botPhones: string[],
-  botPhoneToName: Map<string, string>
-): Map<string, string> {
-  const botUuids = new Map<string, string>();
-  const accountsPath = '/home/.local/share/signal-api/data/accounts.json';
-
+export async function discoverBotUuid(phone: string, apiUrl: string): Promise<string | undefined> {
   try {
-    if (fs.existsSync(accountsPath)) {
-      const accountsData = JSON.parse(fs.readFileSync(accountsPath, 'utf8'));
-      const accounts = accountsData.accounts || [];
-
-      for (const botPhone of botPhones) {
-        const account = accounts.find((acc: any) => acc.number === botPhone);
-        if (account?.uuid) {
-          botUuids.set(botPhone, account.uuid);
-          console.log(`  ${botPhoneToName.get(botPhone)} (${botPhone}): ${account.uuid}`);
-        } else {
-          console.warn(`  Warning: No UUID found for ${botPhoneToName.get(botPhone)} (${botPhone})`);
-        }
-      }
-    } else {
-      console.error(`accounts.json not found at ${accountsPath}`);
+    const response = await axios.get(
+      `${apiUrl}/v1/identities/${encodeURIComponent(phone)}`,
+      { timeout: 5000 }
+    );
+    const identities: any[] = response.data || [];
+    const self = identities.find((id: any) => id.number === phone);
+    if (self?.uuid) {
+      return self.uuid;
     }
-  } catch (error) {
-    console.error('Failed to load bot UUIDs:', error);
+  } catch {
+    // Endpoint not available or errored
+  }
+  return undefined;
+}
+
+/**
+ * Discover UUIDs for multiple phones via signal-cli REST API.
+ */
+export async function discoverBotUuids(botPhones: string[], apiUrl: string): Promise<Map<string, string>> {
+  const botUuids = new Map<string, string>();
+
+  for (const phone of botPhones) {
+    const uuid = await discoverBotUuid(phone, apiUrl);
+    if (uuid) {
+      botUuids.set(phone, uuid);
+      console.log(`  ${phone}: UUID ${uuid}`);
+    } else {
+      console.warn(`  Warning: No UUID discovered for ${phone}`);
+    }
   }
 
   return botUuids;
+}
+
+/**
+ * Discover bot names for phone numbers.
+ *
+ * Attempts platform discovery via signal-cli REST API first.
+ * Falls back to SIGNAL_BOT_NAMES env var (comma-separated, matching BOT_PHONE_NUMBERS by index).
+ */
+export async function discoverBotNames(
+  phones: string[],
+  apiUrl: string
+): Promise<Map<string, string>> {
+  const phoneToName = new Map<string, string>();
+
+  // Try SIGNAL_BOT_NAMES env var first (explicit, reliable)
+  const namesEnv = process.env.SIGNAL_BOT_NAMES || '';
+  const envNames = namesEnv.split(',').map(n => n.trim()).filter(n => n);
+
+  if (envNames.length > 0) {
+    console.log('Discovering bot names from SIGNAL_BOT_NAMES env var...');
+    for (let i = 0; i < Math.min(phones.length, envNames.length); i++) {
+      phoneToName.set(phones[i], envNames[i]);
+      console.log(`  ${phones[i]} → ${envNames[i]}`);
+    }
+    return phoneToName;
+  }
+
+  // Try signal-cli REST API profile discovery
+  console.log('Discovering bot names from signal-cli API...');
+  for (const phone of phones) {
+    try {
+      // Try fetching own profile via signal-cli REST API
+      const response = await axios.get(
+        `${apiUrl}/v1/profiles/${encodeURIComponent(phone)}`,
+        { timeout: 5000 }
+      );
+      const profileName = response.data?.name || response.data?.profile_name;
+      if (profileName) {
+        phoneToName.set(phone, profileName);
+        console.log(`  ${phone} → ${profileName} (from signal-cli profile)`);
+        continue;
+      }
+    } catch {
+      // Profile endpoint not available or doesn't return self-profile
+    }
+
+    try {
+      // Try configuration endpoint
+      const response = await axios.get(
+        `${apiUrl}/v1/configuration/${encodeURIComponent(phone)}`,
+        { timeout: 5000 }
+      );
+      const configName = response.data?.name || response.data?.profile_name;
+      if (configName) {
+        phoneToName.set(phone, configName);
+        console.log(`  ${phone} → ${configName} (from signal-cli config)`);
+        continue;
+      }
+    } catch {
+      // Configuration endpoint not available
+    }
+
+    // No name discovered for this phone
+    console.warn(`  ${phone}: Could not discover name from signal-cli API`);
+  }
+
+  // Check if we got all names
+  const missing = phones.filter(p => !phoneToName.has(p));
+  if (missing.length > 0) {
+    console.error(`\nError: Could not discover names for ${missing.length} bot(s): ${missing.join(', ')}`);
+    console.error('Set SIGNAL_BOT_NAMES env var (comma-separated, matching BOT_PHONE_NUMBERS by index)');
+    process.exit(1);
+  }
+
+  return phoneToName;
 }

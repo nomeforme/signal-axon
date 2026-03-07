@@ -4,10 +4,11 @@
  * Connects multiple Signal bots to the Connectome gRPC server
  *
  * Architecture:
- * - Loads config.json for bot configurations
- * - Parses BOT_PHONE_NUMBERS (comma-separated) and pairs by index with bots
- * - Creates one gRPC client per bot
- * - Creates one WebSocket connection per bot (to Signal CLI)
+ * - Phones arrive via BOT_PHONE_NUMBERS env var (startup batch) and/or
+ *   AxonBindingServer advertisements from bot-runtimes (dynamic)
+ * - Names from SIGNAL_BOT_NAMES env var or signal-cli API
+ * - UUIDs from signal-cli accounts.json
+ * - Creates one gRPC client + WebSocket per bot
  * - Uses class-based components following Connectome nomenclature
  */
 
@@ -17,13 +18,18 @@ loadEnv();
 import { initErrorTracking, Sentry } from '@connectome/grpc-common';
 initErrorTracking({ serviceName: 'signal-axon' });
 
+import { AxonBindingServer } from '@connectome/axon-binding';
+import type { AxonBinding } from '@connectome/axon-binding';
+
 import {
   // Configuration
-  loadConfig,
-  pairPhonesWithBots,
+  getPhones,
   getGrpcConfig,
   getSignalCliConfig,
-  loadBotUuids,
+  getOperationalConfig,
+  discoverBotUuid,
+  discoverBotUuids,
+  discoverBotNames,
   // Bot instance
   createBotInstance,
   // Components
@@ -42,6 +48,7 @@ import {
   type SharedState,
   type RuntimeConfig,
   type BotInstance,
+  type BotConfig,
   type SignalMessageEvent
 } from './grpc/index.js';
 
@@ -55,86 +62,46 @@ async function main(): Promise<void> {
   console.log('╚════════════════════════════════════════════════════════╝');
   console.log();
 
-  // Load configuration
-  const config = loadConfig();
+  // Load configuration from environment
+  const phones = getPhones();
+  const operationalConfig = getOperationalConfig();
   const { host, port } = getGrpcConfig();
   const { wsUrl, apiUrl } = getSignalCliConfig();
+  const bindingPort = parseInt(process.env.AXON_BINDING_PORT || '0');
 
   console.log('Configuration:');
-  console.log(`  Connectome gRPC: ${host}:${port}`);
-  console.log(`  Signal CLI WS:   ${wsUrl}`);
-  console.log(`  Signal CLI API:  ${apiUrl}`);
+  console.log(`  Connectome gRPC:    ${host}:${port}`);
+  console.log(`  Signal CLI WS:      ${wsUrl}`);
+  console.log(`  Signal CLI API:     ${apiUrl}`);
+  console.log(`  Phones (env):       ${phones.length}`);
+  console.log(`  Axon binding:   ${bindingPort || 'disabled'}`);
   console.log();
 
-  // Pair phone numbers with bot configs
-  console.log('Pairing bots with phone numbers...');
-  const pairedBots = pairPhonesWithBots(config);
-
-  if (pairedBots.length === 0) {
-    console.error('Error: No bots configured with phone numbers');
-    process.exit(1);
-  }
-
-  console.log();
-
-  console.log(`Initializing ${pairedBots.length} bot(s)...`);
-  console.log();
-
-  // Build phone → name and name → phone mappings
-  const botPhoneToName = new Map<string, string>();
-  const botNameToPhone = new Map<string, string>();
-  for (const botConfig of pairedBots) {
-    botPhoneToName.set(botConfig.phone!, botConfig.name);
-    botNameToPhone.set(botConfig.name, botConfig.phone!);
-  }
-
-  // Load bot UUIDs from Signal CLI accounts
-  console.log('Loading bot UUIDs...');
-  const botPhoneToUuid = loadBotUuids(
-    pairedBots.map(b => b.phone!),
-    botPhoneToName
-  );
-
-  // Build UUID → name mapping
-  const botUuidToName = new Map<string, string>();
-  for (const [phone, uuid] of botPhoneToUuid) {
-    const name = botPhoneToName.get(phone);
-    if (name && uuid) {
-      botUuidToName.set(uuid, name);
-    }
-  }
-
-  // Populate the name → UUID cache for incoming mention resolution
+  // Shared caches
   const nameToUuidCache = getNameToUuidCache();
-  for (const [uuid, name] of botUuidToName) {
-    nameToUuidCache.set(name.toLowerCase(), uuid);
-  }
-  console.log(`  Populated name→UUID cache with ${nameToUuidCache.size} bot(s)`);
-
-  // Populate the name → phone cache for outgoing mention creation
-  // Signal CLI API requires phone numbers, not UUIDs
   const nameToPhoneCache = getNameToPhoneCache();
-  for (const [phone, name] of botPhoneToName) {
-    nameToPhoneCache.set(name.toLowerCase(), phone);
-  }
-  console.log(`  Populated name→phone cache with ${nameToPhoneCache.size} bot(s)`);
-  console.log();
+
+  // Build managed bot name set (for speech routing)
+  const managedBotNames = new Set<string>();
+
+  // Phone/UUID/name mappings (mutable — grow as bots are added)
+  const phoneToName = new Map<string, string>();
+  const botUuidToName = new Map<string, string>();
 
   // Initialize shared state
   const state: SharedState = {
     bots: new Map<string, BotInstance>(),
     botUuidToName,
-    botPhoneToName,
+    botPhoneToName: phoneToName,
     processingActivations: new Set<string>(),
     botInteractionCounts: new Map<string, number>(),
     runtimeConfig: {
-      randomReplyChance: config.random_reply_chance || 0,
-      maxBotMentionsPerConversation: config.max_bot_mentions_per_conversation || 3,
-      maxConversationFrames: config.max_conversation_frames || 100,
-      maxMemoryFrames: 500,
-      groupPrivacyMode: config.group_privacy_mode || 'opt-out'
-    },
-    pairedBots
+      randomReplyChance: operationalConfig.randomReplyChance,
+      maxBotMentionsPerConversation: operationalConfig.maxBotMentionsPerConversation,
+      maxConversationFrames: operationalConfig.maxConversationFrames,
+      maxMemoryFrames: operationalConfig.maxMemoryFrames,
+      groupPrivacyMode: operationalConfig.groupPrivacyMode
+    }
   };
 
   // Store context transforms for runtime config updates
@@ -143,8 +110,6 @@ async function main(): Promise<void> {
   const updateRuntimeConfig = (updates: Partial<RuntimeConfig>) => {
     Object.assign(state.runtimeConfig, updates);
     console.log('[RuntimeConfig] Updated:', updates);
-
-    // Propagate maxConversationFrames to all context transforms
     if (updates.maxConversationFrames !== undefined) {
       for (const ct of contextTransforms) {
         ct.setMaxConversationFrames(updates.maxConversationFrames);
@@ -152,115 +117,226 @@ async function main(): Promise<void> {
     }
   };
 
-  // Initialize each bot
-  const allBotNames = pairedBots.map(b => b.name);
-  const remoteBotNames = pairedBots.filter(b => b.remote).map(b => b.name);
-  const allBotPhones = pairedBots.map(b => b.phone!);
+  // Consistency checker + WS/message handler maps
+  const allBotPhones: string[] = [];
   const wsHandlersMap = new Map<string, SignalWebSocketReceptor>();
   const messageHandlersMap = new Map<string, (event: SignalMessageEvent) => Promise<void>>();
 
-  // Create consistency checker (will be fully configured after bots are initialized)
   const consistencyChecker = new MessageConsistencyChecker({
     botUuidToName,
-    botPhoneToName,
+    botPhoneToName: phoneToName,
     allBotPhones,
     wsHandlers: wsHandlersMap,
     messageHandlers: messageHandlersMap,
-    checkDelayMs: 2000  // Wait 2 seconds for all bots to receive
+    checkDelayMs: 2000
   });
 
-  for (const botConfig of pairedBots) {
-    const botPhone = botConfig.phone!;
-    console.log(`Initializing ${botConfig.name} (${botPhone})...`);
+  // ========================================================================
+  // addSignalBot — reusable: initialize a single Signal bot
+  // Called both at startup (env phones) and dynamically (binding ads)
+  // ========================================================================
+  async function addSignalBot(
+    name: string, phone: string, uuid: string | undefined, source: string
+  ): Promise<boolean> {
+    if (state.bots.has(phone)) {
+      console.log(`  ${name}: Already managed, skipping (${source})`);
+      return true;
+    }
 
-    // Create bot instance
+    console.log(`  Initializing ${name} (${phone}) [${source}]...`);
+
+    // If UUID not provided, discover it via signal-cli REST API
+    if (!uuid) {
+      const found = await discoverBotUuid(phone, apiUrl);
+      if (found) {
+        uuid = found;
+        console.log(`  ${name}: UUID discovered from signal-cli API: ${uuid}`);
+      }
+    }
+
+    // Update caches
+    phoneToName.set(phone, name);
+    managedBotNames.add(name);
+    allBotPhones.push(phone);
+    nameToPhoneCache.set(name.toLowerCase(), phone);
+    if (uuid) {
+      botUuidToName.set(uuid, name);
+      nameToUuidCache.set(name.toLowerCase(), uuid);
+    }
+
+    const botConfig: BotConfig = { name, phone, uuid };
     const bot = createBotInstance(botConfig, host, port);
-    state.bots.set(botPhone, bot);
+    state.bots.set(phone, bot);
 
-    // Create components following Connectome nomenclature
-
-    // 1. SignalSpeechEffector - handles server-initiated speech
+    // Create components
     const speechEffector = new SignalSpeechEffector({
       botConfig: bot.config,
       streamManager: bot.streamManager,
-      allBotNames,
-      remoteBotNames,
-      maxMessageLength: config.max_message_length
+      managedBotNames,
+      maxMessageLength: operationalConfig.maxMessageLength
     });
     speechEffector.setup();
 
-    // 2. FocusedContextTransform - fetches and renders context from server
     const contextTransform = new FocusedContextTransform({
       grpcClient: bot.grpcClient,
-      botName: botConfig.name,
-      systemPrompt: botConfig.prompt || 'Standard',
+      botName: name,
+      systemPrompt: 'Standard',
       maxConversationFrames: state.runtimeConfig.maxConversationFrames,
-      skipIdentityPrompt: botConfig.skip_identity_prompt,
     });
     contextTransforms.push(contextTransform);
 
-    // 3. SignalCommandEffector - handles ! commands
-    const commandEffector = new SignalCommandEffector(botConfig.name);
+    const commandEffector = new SignalCommandEffector(name);
 
-    // 4. SignalMessageReceptor - handles Signal messages and triggers remote gRPC activation
     const messageReceptor = new SignalMessageReceptor({
-      bot,
-      state,
-      commandEffector,
-      updateConfig: updateRuntimeConfig
+      bot, state, commandEffector, updateConfig: updateRuntimeConfig
     });
 
-    // 5. SignalReceiptReceptor - handles receipts
     const receiptReceptor = new SignalReceiptReceptor({ bot });
-
-    // 6. SignalTypingReceptor - handles typing indicators
     const typingReceptor = new SignalTypingReceptor({ bot });
 
-    // 7. SignalWebSocketReceptor - handles WebSocket connection to Signal CLI
+    const phoneToUuidLocal = new Map<string, string>();
+    for (const [p, n] of phoneToName) {
+      const u = [...botUuidToName.entries()].find(([, nn]) => nn === n)?.[0];
+      if (u) phoneToUuidLocal.set(p, u);
+    }
+
     const wsReceptor = new SignalWebSocketReceptor({
       wsUrl,
-      httpUrl: apiUrl,  // HTTP base URL for downloading attachments
-      botPhone,
-      botUuid: botPhoneToUuid.get(botPhone),  // This bot's UUID for mention detection
-      botUuids: botPhoneToUuid,
+      httpUrl: apiUrl,
+      botPhone: phone,
+      botUuid: uuid,
+      botUuids: phoneToUuidLocal,
       onMessage: async (event) => {
-        // Record for consistency checking BEFORE any filtering
-        // This allows the checker to track which bots received each message
-        consistencyChecker.recordMessage(event, botPhone);
-
+        consistencyChecker.recordMessage(event, phone);
         await messageReceptor.handleMessage(event);
       },
-      // NOTE: Do not delete - receipt handling disabled to avoid flooding connectome server
-      // onReceipt: async (receipt) => {
-      //   await receiptReceptor.handleReceipt(receipt);
-      // },
       onReceipt: async (_receipt) => {},
       onTyping: async (typing) => {
         await typingReceptor.handleTyping(typing);
       }
     });
 
-    // Store for consistency checker and shutdown
-    wsHandlersMap.set(botPhone, wsReceptor);
-    messageHandlersMap.set(botPhone, (event) => messageReceptor.handleMessage(event));
+    wsHandlersMap.set(phone, wsReceptor);
+    messageHandlersMap.set(phone, (event) => messageReceptor.handleMessage(event));
 
-    console.log(`  ${botConfig.name}: Components initialized`);
+    // Connect gRPC and start WebSocket
+    try {
+      await bot.grpcClient.connect();
+      wsReceptor.connect();
+      console.log(`  ${name}: Components initialized, connected [${source}]`);
+      return true;
+    } catch (error: any) {
+      console.error(`  ${name}: Failed to connect: ${error.message}`);
+      // Clean up tracking maps so consistency checker doesn't try to use this bot
+      state.bots.delete(phone);
+      phoneToName.delete(phone);
+      managedBotNames.delete(name);
+      wsHandlersMap.delete(phone);
+      messageHandlersMap.delete(phone);
+      const idx = allBotPhones.indexOf(phone);
+      if (idx >= 0) allBotPhones.splice(idx, 1);
+      if (uuid) {
+        botUuidToName.delete(uuid);
+        nameToUuidCache.delete(name.toLowerCase());
+      }
+      nameToPhoneCache.delete(name.toLowerCase());
+      return false;
+    }
+  }
+
+  // ========================================================================
+  // Step 1: Start AxonBindingServer FIRST (so bot-runtimes can connect
+  // while env-based bots are still initializing)
+  // ========================================================================
+  let bindingServer: AxonBindingServer | undefined;
+
+  if (bindingPort > 0) {
+    bindingServer = new AxonBindingServer({ port: bindingPort });
+
+    // Queue binding advertisements so signal-cli UUID discovery calls are serialized
+    // (signal-cli can't handle 15+ concurrent /v1/identities requests)
+    const bindingQueue: AxonBinding[] = [];
+    let processingBindings = false;
+
+    async function processBindingQueue(): Promise<void> {
+      if (processingBindings) return;
+      processingBindings = true;
+      while (bindingQueue.length > 0) {
+        const binding = bindingQueue.shift()!;
+        const phone = binding.credentials.phone;
+        if (!phone) {
+          console.error(`[AxonBinding] Signal binding for ${binding.agentName} missing phone`);
+          continue;
+        }
+        console.log(`[AxonBinding] Adding bot ${binding.agentName}...`);
+        await addSignalBot(
+          binding.agentName,
+          phone,
+          binding.credentials.uuid,
+          `binding:${binding.agentName}`
+        );
+      }
+      processingBindings = false;
+    }
+
+    bindingServer.on('binding:added', (binding: AxonBinding) => {
+      if (binding.platform !== 'signal') {
+        console.log(`[AxonBinding] Ignoring non-signal binding: ${binding.agentName} → ${binding.platform}`);
+        return;
+      }
+      bindingQueue.push(binding);
+      processBindingQueue();
+    });
+
+    await bindingServer.start();
+  }
+
+  // ========================================================================
+  // Step 2: Initialize bots from env vars (startup batch)
+  // ========================================================================
+  if (phones.length > 0) {
+    console.log('Discovering bot names...');
+    const envPhoneToName = await discoverBotNames(phones, apiUrl);
+    console.log('Discovering bot UUIDs...');
+    const phoneToUuid = await discoverBotUuids(phones, apiUrl);
+
+    console.log(`\nInitializing ${phones.length} bot(s) from env...`);
+
+    for (const phone of phones) {
+      const name = envPhoneToName.get(phone);
+      if (!name) {
+        console.warn(`  No name for ${phone}, skipping`);
+        continue;
+      }
+      const uuid = phoneToUuid.get(phone);
+      await addSignalBot(name, phone, uuid, 'env');
+    }
+
+    console.log(`  ${state.bots.size} bot(s) initialized from env`);
+    console.log();
+  }
+
+  if (state.bots.size === 0 && !bindingServer) {
+    console.error('Error: No bots initialized and no binding server running');
+    process.exit(1);
   }
 
   // Handle shutdown
   const shutdown = async (): Promise<void> => {
     console.log('\n\nShutting down...');
 
-    // Stop consistency checker
+    if (bindingServer) {
+      await bindingServer.stop();
+    }
+
     consistencyChecker.stop();
 
-    // Disconnect WebSocket handlers
     for (const [, ws] of wsHandlersMap) {
       ws.disconnect();
     }
 
     for (const [botPhone, bot] of state.bots) {
-      const botName = botPhoneToName.get(botPhone);
+      const botName = phoneToName.get(botPhone);
       console.log(`  Disconnecting ${botName}...`);
       bot.streamManager.unsubscribeAll();
       bot.grpcClient.disconnect();
@@ -274,28 +350,11 @@ async function main(): Promise<void> {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  // Connect all bots
-  console.log('\nConnecting to services...');
-
-  for (const [botPhone, bot] of state.bots) {
-    const botName = botPhoneToName.get(botPhone)!;
-
-    try {
-      // Connect to Connectome gRPC server
-      await bot.grpcClient.connect();
-      console.log(`  ${botName}: Connected to Connectome`);
-    } catch (error: any) {
-      console.error(`  ${botName}: Failed to connect to Connectome: ${error.message}`);
-    }
-  }
-
-  // Start WebSocket connections
-  for (const [, ws] of wsHandlersMap) {
-    ws.connect();
-  }
-
   console.log('\n═══════════════════════════════════════════════════════');
   console.log(`  Signal AXON running with ${state.bots.size} bot(s)`);
+  if (bindingServer) {
+    console.log(`  Axon binding server on port ${bindingPort}`);
+  }
   console.log('  Listening for Signal messages...');
   console.log('═══════════════════════════════════════════════════════');
   console.log('\nPress Ctrl+C to stop.\n');

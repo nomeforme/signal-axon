@@ -401,6 +401,12 @@ export class SignalMessageReceptor {
 
     // Trigger remote agent activation via gRPC
     try {
+      // Guard: skip if gRPC client lost connection
+      if (!this.bot.grpcClient.isConnected()) {
+        console.warn(`[SignalMessageReceptor:${botName}] gRPC client not connected, skipping activation`);
+        return;
+      }
+
       // Ensure this bot's stream manager is subscribed so its
       // speech effector receives the reply (the emit lottery winner may be a different bot)
       const botPhone = this.bot.config.phone!;

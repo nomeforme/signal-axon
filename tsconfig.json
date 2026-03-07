@@ -13,6 +13,7 @@
     { "path": "../connectome-agent-core" },
     { "path": "../connectome-axon-interfaces" },
     { "path": "../axon-server" },
-    { "path": "../connectome-grpc-common" }
+    { "path": "../connectome-grpc-common" },
+    { "path": "../connectome-axon-binding" }
   ]
 }

@@ -1,41 +1,28 @@
 /**
  * Type definitions for Signal AXON gRPC mode
+ *
+ * Bot identities are discovered from signal-cli, not from static config.
  */
 
 import type { SignalGrpcClient } from './client.js';
 import type { StreamManager } from './stream-manager.js';
 
 /**
- * Bot configuration from config.json
+ * Bot configuration — discovered from signal-cli + env vars
  *
- * All cognition fields (model, tools, mcp, skills, rlm, etc.) live in
- * bot-runtime/config.json. The axon only needs identity + platform binding.
+ * name comes from signal-cli profile or SIGNAL_BOT_NAMES env.
+ * phone comes from BOT_PHONE_NUMBERS env.
+ * uuid comes from signal-cli accounts.json.
+ * All cognition fields live in bot-runtime config.
  */
 export interface BotConfig {
   name: string;
   phone?: string;
   uuid?: string;
-  prompt?: string;
-  /** Skip the platform identity text in system prompt */
-  skip_identity_prompt?: boolean;
-  /** Remote mode: cognition delegated to bot-runtime (all bots are remote) */
-  remote?: boolean;
 }
 
 /**
- * Signal configuration from config.json
- */
-export interface SignalConfig {
-  bots: BotConfig[];
-  group_privacy_mode?: 'opt-in' | 'opt-out';
-  random_reply_chance?: number;
-  max_bot_mentions_per_conversation?: number;
-  max_conversation_frames?: number;
-  max_message_length?: number;
-}
-
-/**
- * Runtime configuration for commands (shared across all bots)
+ * Runtime configuration (from env vars with defaults, tunable via ! commands)
  */
 export interface RuntimeConfig {
   randomReplyChance: number;
@@ -60,7 +47,7 @@ export interface BotInstance {
 export interface SharedState {
   /** Map from bot phone to bot instance */
   bots: Map<string, BotInstance>;
-  /** Map from bot UUID to bot name (for mention-based routing) */
+  /** Map from bot UUID to bot name (populated from signal-cli) */
   botUuidToName: Map<string, string>;
   /** Map from bot phone to bot name */
   botPhoneToName: Map<string, string>;
@@ -70,8 +57,6 @@ export interface SharedState {
   botInteractionCounts: Map<string, number>;
   /** Runtime configuration */
   runtimeConfig: RuntimeConfig;
-  /** All paired bot configs (for iteration) */
-  pairedBots: BotConfig[];
 }
 
 /**

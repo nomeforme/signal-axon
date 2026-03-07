@@ -5,8 +5,8 @@
  * and sends them to Signal:
  * - Speech facets → Signal messages
  *
- * Cognition is handled by remote bot-runtime containers; this effector
- * receives their output via gRPC subscriptions and delivers it to Signal.
+ * Each managed bot delivers only its own speech. Unmanaged agents
+ * (exogenous bots) handle their own platform delivery.
  */
 
 import axios from 'axios';
@@ -18,8 +18,8 @@ import type { BotConfig } from '../types.js';
 export interface SignalSpeechEffectorConfig {
   botConfig: BotConfig;
   streamManager: StreamManager;
-  allBotNames: string[];
-  remoteBotNames: string[];
+  /** Set of bot names managed by this axon (discovered on startup) */
+  managedBotNames: Set<string>;
   maxMessageLength?: number;
 }
 
@@ -31,15 +31,13 @@ export interface SignalSpeechEffectorConfig {
 export class SignalSpeechEffector {
   private botConfig: BotConfig;
   private streamManager: StreamManager;
-  private allBotNames: string[];
-  private remoteBotNames: string[];
+  private managedBotNames: Set<string>;
   private maxMessageLength?: number;
 
   constructor(config: SignalSpeechEffectorConfig) {
     this.botConfig = config.botConfig;
     this.streamManager = config.streamManager;
-    this.allBotNames = config.allBotNames;
-    this.remoteBotNames = config.remoteBotNames;
+    this.managedBotNames = config.managedBotNames;
     this.maxMessageLength = config.maxMessageLength;
   }
 
@@ -69,6 +67,10 @@ export class SignalSpeechEffector {
 
   /**
    * Handle speech facet from server
+   *
+   * Each managed bot delivers only its own speech.
+   * If the speaker is another managed bot, that bot's effector handles it.
+   * If the speaker is an unmanaged agent (exogenous), it has its own platform client.
    */
   private async handleSpeech(facet: any, streamInfo: StreamInfo): Promise<void> {
     const botName = this.botConfig.name;
@@ -76,20 +78,13 @@ export class SignalSpeechEffector {
 
     // Determine speaker identity
     const speakerName = facet.agentName || facet.agentId || '';
-    const isFromOurBot = this.allBotNames.includes(speakerName) || this.allBotNames.includes(facet.agentId || '') || this.allBotNames.includes(facet.agentName || '');
-    const isRemote = this.remoteBotNames.includes(speakerName) || this.remoteBotNames.includes(facet.agentId || '') || this.remoteBotNames.includes(facet.agentName || '');
 
-    // Skip speech from LOCAL bots (they send directly to Signal via agent effector)
-    if (isFromOurBot && !isRemote) {
+    // Only deliver speech that matches THIS bot's name
+    if (speakerName !== botName && facet.agentName !== botName) {
       return;
     }
 
-    // For remote bot speech, only THIS bot's effector should deliver (avoid duplicates from other bots)
-    if (isRemote && speakerName !== botName && facet.agentName !== botName) {
-      return;
-    }
-
-    console.log(`[SignalSpeechEffector:${botName}] Sending message to ${streamInfo.groupName || streamInfo.contactNumber || streamInfo.streamId}${isRemote ? ` (remote bot: ${speakerName})` : ''}`);
+    console.log(`[SignalSpeechEffector:${botName}] Sending message to ${streamInfo.groupName || streamInfo.contactNumber || streamInfo.streamId}`);
 
     try {
       // Clean speech content (strip XML tags, extract tool syntax)
