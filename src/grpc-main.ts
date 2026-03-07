@@ -51,6 +51,7 @@ import {
   type BotConfig,
   type SignalMessageEvent
 } from './grpc/index.js';
+import { messageDeduplicator } from './message-deduplicator.js';
 
 /**
  * Main entry point
@@ -215,6 +216,50 @@ async function main(): Promise<void> {
       onReceipt: async (_receipt) => {},
       onTyping: async (typing) => {
         await typingReceptor.handleTyping(typing);
+      },
+      onEdit: async (event) => {
+        // Deduplicate in groups — only one bot should emit the edit
+        const isGroup = !!event.groupId;
+        const dedupeKey = `edit-${event.senderUuid || event.sender}-${event.originalTimestamp}`;
+        if (isGroup && !messageDeduplicator.shouldEmit(dedupeKey, phone, true)) {
+          return;
+        }
+        try {
+          await bot.grpcClient.emitSignalMessageUpdate({
+            content: event.content,
+            sender: event.sender,
+            senderNumber: event.senderNumber,
+            senderUuid: event.senderUuid,
+            groupId: event.groupId,
+            groupName: event.groupName,
+            botPhone: phone,
+            originalTimestamp: event.originalTimestamp,
+            editedTimestamp: event.editedTimestamp
+          });
+          console.log(`[SignalAxon:${name}] Emitted messageUpdate for ts=${event.originalTimestamp}: ${event.content.substring(0, 50)}...`);
+        } catch (error: any) {
+          console.error(`[SignalAxon:${name}] Error emitting messageUpdate:`, error.message);
+        }
+      },
+      onDelete: async (event) => {
+        // Deduplicate in groups
+        const isGroup = !!event.groupId;
+        const dedupeKey = `delete-${event.senderUuid || event.senderNumber}-${event.targetTimestamp}`;
+        if (isGroup && !messageDeduplicator.shouldEmit(dedupeKey, phone, true)) {
+          return;
+        }
+        try {
+          await bot.grpcClient.emitSignalMessageDelete({
+            senderUuid: event.senderUuid,
+            senderNumber: event.senderNumber,
+            groupId: event.groupId,
+            botPhone: phone,
+            targetTimestamp: event.targetTimestamp
+          });
+          console.log(`[SignalAxon:${name}] Emitted messageDelete for ts=${event.targetTimestamp}`);
+        } catch (error: any) {
+          console.error(`[SignalAxon:${name}] Error emitting messageDelete:`, error.message);
+        }
       }
     });
 

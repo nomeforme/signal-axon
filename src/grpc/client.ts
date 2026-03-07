@@ -160,6 +160,56 @@ export class SignalGrpcClient extends EventEmitter {
   }
 
   /**
+   * Emit a Signal message update event (message was edited)
+   */
+  async emitSignalMessageUpdate(update: {
+    content: string;
+    sender: string;
+    senderNumber?: string;
+    senderUuid?: string;
+    groupId?: string;
+    groupName?: string;
+    botPhone: string;
+    originalTimestamp: number;
+    editedTimestamp: number;
+  }): Promise<{ success: boolean }> {
+    const streamId = update.groupId
+      ? `signal:group:${update.groupId}`
+      : `signal:dm:${update.botPhone}:${update.senderNumber || update.senderUuid}`;
+
+    const result = await this.client.emitEvent(
+      'signal:messageUpdate',
+      { ...update, streamId, streamType: 'signal' },
+      { priority: 'high', waitForFrame: true }
+    );
+
+    return { success: result.success };
+  }
+
+  /**
+   * Emit a Signal message delete event
+   */
+  async emitSignalMessageDelete(del: {
+    senderUuid?: string;
+    senderNumber?: string;
+    groupId?: string;
+    botPhone: string;
+    targetTimestamp: number;
+  }): Promise<{ success: boolean }> {
+    const streamId = del.groupId
+      ? `signal:group:${del.groupId}`
+      : `signal:dm:${del.botPhone}:${del.senderNumber || del.senderUuid}`;
+
+    const result = await this.client.emitEvent(
+      'signal:messageDelete',
+      { ...del, streamId, streamType: 'signal' },
+      { priority: 'high', waitForFrame: true }
+    );
+
+    return { success: result.success };
+  }
+
+  /**
    * Emit a Signal receipt event
    */
   async emitSignalReceipt(receipt: {

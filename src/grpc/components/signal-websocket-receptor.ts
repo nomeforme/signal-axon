@@ -20,6 +20,28 @@ const IMAGE_MAX_DIMENSION = 1024;  // Max width or height
 const IMAGE_JPEG_QUALITY = 80;    // JPEG quality (1-100)
 const IMAGE_MAX_BYTES = 3_500_000; // Max compressed size before base64 (~4.7MB base64, under 5MB API limit)
 
+export interface SignalEditEvent {
+  content: string;
+  sender: string;
+  senderNumber?: string;
+  senderUuid?: string;
+  groupId?: string;
+  groupName?: string;
+  botPhone: string;
+  originalTimestamp: number;
+  editedTimestamp: number;
+  attachments?: SignalAttachment[];
+  mentions?: SignalMention[];
+}
+
+export interface SignalDeleteEvent {
+  senderUuid?: string;
+  senderNumber?: string;
+  groupId?: string;
+  botPhone: string;
+  targetTimestamp: number;
+}
+
 export interface SignalWebSocketReceptorConfig {
   wsUrl: string;
   httpUrl: string;  // HTTP base URL for downloading attachments
@@ -29,6 +51,8 @@ export interface SignalWebSocketReceptorConfig {
   onMessage: (event: SignalMessageEvent) => Promise<void>;
   onReceipt: (receipt: SignalReceiptEvent) => Promise<void>;
   onTyping: (typing: SignalTypingEvent) => Promise<void>;
+  onEdit?: (event: SignalEditEvent) => Promise<void>;
+  onDelete?: (event: SignalDeleteEvent) => Promise<void>;
 }
 
 export interface SignalReceiptEvent {
@@ -70,6 +94,8 @@ export class SignalWebSocketReceptor {
   private onMessage: (event: SignalMessageEvent) => Promise<void>;
   private onReceipt: (receipt: SignalReceiptEvent) => Promise<void>;
   private onTyping: (typing: SignalTypingEvent) => Promise<void>;
+  private onEdit?: (event: SignalEditEvent) => Promise<void>;
+  private onDelete?: (event: SignalDeleteEvent) => Promise<void>;
 
   constructor(config: SignalWebSocketReceptorConfig) {
     this.wsUrl = config.wsUrl;
@@ -80,6 +106,8 @@ export class SignalWebSocketReceptor {
     this.onMessage = config.onMessage;
     this.onReceipt = config.onReceipt;
     this.onTyping = config.onTyping;
+    this.onEdit = config.onEdit;
+    this.onDelete = config.onDelete;
   }
 
   /**
@@ -168,6 +196,16 @@ export class SignalWebSocketReceptor {
     // Handle typing indicators
     if (env.typingMessage) {
       await this.handleTypingMessage(env);
+    }
+
+    // Handle edit messages (Signal protocol message edits)
+    if (env.editMessage) {
+      await this.handleEditMessage(env);
+    }
+
+    // Handle remote delete messages
+    if (env.dataMessage?.remoteDelete) {
+      await this.handleDeleteMessage(env);
     }
   }
 
@@ -264,6 +302,83 @@ export class SignalWebSocketReceptor {
       await this.onTyping(event);
     } catch (error) {
       console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error handling typing:`, error);
+    }
+  }
+
+  /**
+   * Handle edit message (Signal protocol message edit)
+   * Signal CLI sends editMessage with targetSentTimestamp + the new dataMessage
+   */
+  private async handleEditMessage(env: any): Promise<void> {
+    if (!this.onEdit) return;
+
+    const editMessage = env.editMessage;
+    const dataMessage = editMessage.dataMessage;
+    if (!dataMessage) return;
+
+    const source = env.source || env.sourceNumber;
+    const sourceUuid = env.sourceUuid;
+    const originalTimestamp = editMessage.targetSentTimestamp;
+
+    if (!originalTimestamp) {
+      console.warn(`[SignalWebSocketReceptor:${this.botPhone}] Edit message missing targetSentTimestamp, skipping`);
+      return;
+    }
+
+    const attachments = await this.parseAttachments(dataMessage.attachments);
+
+    const event: SignalEditEvent = {
+      content: dataMessage.message || '',
+      sender: env.sourceName || source || 'Unknown',
+      senderNumber: env.sourceNumber,
+      senderUuid: sourceUuid,
+      groupId: dataMessage.groupInfo?.groupId,
+      groupName: dataMessage.groupInfo?.groupName,
+      botPhone: this.botPhone,
+      originalTimestamp,
+      editedTimestamp: dataMessage.timestamp || Date.now(),
+      attachments,
+      mentions: this.parseMentions(dataMessage.mentions)
+    };
+
+    console.log(`[SignalWebSocketReceptor:${this.botPhone}] Edit message: original=${originalTimestamp}, new content: ${event.content.substring(0, 50)}...`);
+
+    try {
+      await this.onEdit(event);
+    } catch (error) {
+      console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error handling edit message:`, error);
+    }
+  }
+
+  /**
+   * Handle remote delete message
+   * Signal CLI sends dataMessage.remoteDelete.timestamp referencing the message to delete
+   */
+  private async handleDeleteMessage(env: any): Promise<void> {
+    if (!this.onDelete) return;
+
+    const remoteDelete = env.dataMessage.remoteDelete;
+    const targetTimestamp = remoteDelete.timestamp;
+
+    if (!targetTimestamp) {
+      console.warn(`[SignalWebSocketReceptor:${this.botPhone}] Delete message missing target timestamp, skipping`);
+      return;
+    }
+
+    const event: SignalDeleteEvent = {
+      senderUuid: env.sourceUuid,
+      senderNumber: env.sourceNumber,
+      groupId: env.dataMessage.groupInfo?.groupId,
+      botPhone: this.botPhone,
+      targetTimestamp
+    };
+
+    console.log(`[SignalWebSocketReceptor:${this.botPhone}] Delete message: target=${targetTimestamp}`);
+
+    try {
+      await this.onDelete(event);
+    } catch (error) {
+      console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error handling delete message:`, error);
     }
   }
 

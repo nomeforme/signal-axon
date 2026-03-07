@@ -12,7 +12,7 @@
 
 // Receptors - Handle Signal events
 export { SignalWebSocketReceptor } from './signal-websocket-receptor.js';
-export type { SignalWebSocketReceptorConfig, SignalReceiptEvent, SignalTypingEvent } from './signal-websocket-receptor.js';
+export type { SignalWebSocketReceptorConfig, SignalReceiptEvent, SignalTypingEvent, SignalEditEvent, SignalDeleteEvent } from './signal-websocket-receptor.js';
 
 export { SignalMessageReceptor } from './signal-message-receptor.js';
 export type { SignalMessageReceptorConfig } from './signal-message-receptor.js';
