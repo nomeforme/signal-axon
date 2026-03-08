@@ -6,6 +6,8 @@
  * - !bb N - Set max bot-to-bot interactions (0 to disable)
  * - !mcf N - Set max conversation frames
  * - !mmf N - Set max memory frames
+ * - !stop - Abort the current agent cycle
+ * - !steer <message> - Redirect the running agent with a new instruction
  * - !help - Show help
  */
 
@@ -125,6 +127,29 @@ export class SignalCommandEffector {
           : `Max output tokens for ${this.botName} set to ${effective}`;
       }
 
+      case '!stop': {
+        if (emitEvent) {
+          emitEvent('agent:command', {
+            type: 'stop',
+            targetAgent: this.botName,
+          }).catch((e: any) => console.error(`[SignalCommandEffector:${this.botName}] Failed to emit stop:`, e.message));
+        }
+        return `Stopping ${this.botName}...`;
+      }
+
+      case '!steer': {
+        const steerMsg = parts.slice(1).join(' ').trim();
+        if (!steerMsg) return 'Usage: !steer <message>';
+        if (emitEvent) {
+          emitEvent('agent:command', {
+            type: 'steer',
+            message: steerMsg,
+            targetAgent: this.botName,
+          }).catch((e: any) => console.error(`[SignalCommandEffector:${this.botName}] Failed to emit steer:`, e.message));
+        }
+        return `Steering ${this.botName}: ${steerMsg}`;
+      }
+
       case '!help':
         return this.getHelpText(currentConfig);
 
@@ -154,6 +179,9 @@ export class SignalCommandEffector {
 
 !mt [N] - Max output tokens per response (per-bot, 0=model default)
   Current: ${this.maxOutputTokensOverride ?? 'model default'}
+
+!stop - Abort the current agent cycle
+!steer <message> - Redirect the running agent mid-cycle
 
 !help - Show this help`;
   }
