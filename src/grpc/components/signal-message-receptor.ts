@@ -362,13 +362,36 @@ export class SignalMessageReceptor {
     // Log activation
     console.log(`[SignalMessageReceptor:${botName}] Activating for message from ${event.sender}: ${readableContent.substring(0, 50)}... (${activationReason})`);
 
+    // Handle "m continue" — continuation command (resume truncated bot output)
+    const contentStripped = readableContent.replace(/^@\S+\s+/, '').trim();
+    if (/^m\s+(continue|go|more)\b/i.test(contentStripped)) {
+      console.log(`[SignalMessageReceptor:${botName}] Continuation command detected`);
+
+      // Activate the agent with continuation flag — skip normal message flow
+      // (Signal doesn't support message deletion, so the trigger stays in history)
+      try {
+        await this.bot.grpcClient.activateAgent(streamId, 'continuation', {
+          messageContent: '',
+          authorName: event.sender,
+          streamType: 'signal',
+          targetBot: botName,
+          continuation: 'true',
+        });
+        console.log(`[SignalMessageReceptor:${botName}] Continuation activation sent for stream ${streamId}`);
+      } catch (error: any) {
+        console.error(`[SignalMessageReceptor:${botName}] Error sending continuation activation:`, error.message);
+      }
+      return;
+    }
+
     // Handle ! commands
     const commandText = this.parseCommand(readableContent);
     if (commandText) {
       const response = this.commandEffector.handleCommand(
         commandText,
         this.state.runtimeConfig,
-        this.updateConfig
+        this.updateConfig,
+        (topic, payload) => this.bot.grpcClient.emitEvent(topic, payload)
       );
       if (response) {
         try {

@@ -12,6 +12,7 @@
 import type { RuntimeConfig } from '../types.js';
 
 export type ConfigUpdateCallback = (updates: Partial<RuntimeConfig>) => void;
+export type EmitEventCallback = (topic: string, payload: Record<string, any>) => Promise<any>;
 
 /**
  * SignalCommandEffector - Handles ! commands
@@ -20,6 +21,8 @@ export type ConfigUpdateCallback = (updates: Partial<RuntimeConfig>) => void;
  */
 export class SignalCommandEffector {
   private botName: string;
+  /** Tracks the last-set maxOutputTokens override (axon-local, per command effector instance) */
+  private maxOutputTokensOverride: number | undefined;
 
   constructor(botName: string) {
     this.botName = botName;
@@ -31,12 +34,14 @@ export class SignalCommandEffector {
    * @param content - Message content (starting with !)
    * @param currentConfig - Current runtime config
    * @param updateConfig - Callback to update config
+   * @param emitEvent - Optional callback to emit events to Connectome (for per-bot config commands)
    * @returns Response message, or null if not a recognized command
    */
   handleCommand(
     content: string,
     currentConfig: RuntimeConfig,
-    updateConfig: ConfigUpdateCallback
+    updateConfig: ConfigUpdateCallback,
+    emitEvent?: EmitEventCallback
   ): string | null {
     const trimmed = content.trim().toLowerCase();
 
@@ -98,6 +103,28 @@ export class SignalCommandEffector {
         return `Max memory frames set to ${value}`;
       }
 
+      case '!mt': {
+        if (!arg) {
+          if (this.maxOutputTokensOverride === undefined) {
+            return `Max output tokens for ${this.botName}: using model default`;
+          }
+          return `Max output tokens for ${this.botName}: ${this.maxOutputTokensOverride}`;
+        }
+        const value = parseInt(arg);
+        if (isNaN(value) || value < 0) return 'Invalid value. Use a number >= 0 (0 = reset to model default)';
+        const effective = value === 0 ? undefined : value;
+        this.maxOutputTokensOverride = effective;
+        if (emitEvent) {
+          emitEvent('bot:config', {
+            targetAgent: this.botName,
+            maxOutputTokens: effective ?? null,
+          }).catch((e: any) => console.error(`[SignalCommandEffector:${this.botName}] Failed to emit config event:`, e.message));
+        }
+        return effective === undefined
+          ? `Max output tokens for ${this.botName} reset to model default`
+          : `Max output tokens for ${this.botName} set to ${effective}`;
+      }
+
       case '!help':
         return this.getHelpText(currentConfig);
 
@@ -124,6 +151,9 @@ export class SignalCommandEffector {
 
 !mmf [N] - Max memory frames
   Current: ${config.maxMemoryFrames}
+
+!mt [N] - Max output tokens per response (per-bot, 0=model default)
+  Current: ${this.maxOutputTokensOverride ?? 'model default'}
 
 !help - Show this help`;
   }
