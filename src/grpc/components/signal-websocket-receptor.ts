@@ -19,6 +19,7 @@ import type { SignalMessageEvent, SignalAttachment, SignalMention, SignalQuote }
 const IMAGE_MAX_DIMENSION = 1024;  // Max width or height
 const IMAGE_JPEG_QUALITY = 80;    // JPEG quality (1-100)
 const IMAGE_MAX_BYTES = 3_500_000; // Max compressed size before base64 (~4.7MB base64, under 5MB API limit)
+const FILE_MAX_BYTES = parseInt(process.env.FILE_MAX_BYTES || '10000000', 10); // Max non-image file size to download (default 10MB)
 
 export interface SignalEditEvent {
   content: string;
@@ -428,8 +429,18 @@ export class SignalWebSocketReceptor {
             size: att.size
           });
         }
+      } else if (att.id && att.size && att.size <= FILE_MAX_BYTES) {
+        // Non-image attachment: download and include as base64
+        const base64Data = await this.downloadFileAttachment(att.id);
+        processedAttachments.push({
+          id: att.id,
+          contentType: att.contentType,
+          filename: att.filename,
+          size: att.size,
+          data: base64Data ?? undefined,
+        });
       } else {
-        // Non-image attachment, include metadata only
+        // Too large or no ID — metadata only
         processedAttachments.push({
           id: att.id,
           contentType: att.contentType,
@@ -477,6 +488,35 @@ export class SignalWebSocketReceptor {
       return null;
     } catch (error) {
       console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error downloading attachment:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Download a non-image file attachment from Signal CLI and return as raw base64
+   */
+  private async downloadFileAttachment(attachmentId: string): Promise<string | null> {
+    if (!this.httpUrl) {
+      console.warn(`[SignalWebSocketReceptor:${this.botPhone}] No httpUrl configured, cannot download file attachment`);
+      return null;
+    }
+    try {
+      const url = `${this.httpUrl}/v1/attachments/${attachmentId}`;
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Downloading file attachment from ${url}`);
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`[SignalWebSocketReceptor:${this.botPhone}] Failed to download file: ${response.status}`);
+        return null;
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > FILE_MAX_BYTES) {
+        console.warn(`[SignalWebSocketReceptor:${this.botPhone}] File too large (${buffer.length} bytes), skipping`);
+        return null;
+      }
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Downloaded file attachment: ${buffer.length} bytes`);
+      return buffer.toString('base64');
+    } catch (error) {
+      console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error downloading file attachment:`, error);
       return null;
     }
   }
