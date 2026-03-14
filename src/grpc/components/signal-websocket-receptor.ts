@@ -170,7 +170,11 @@ export class SignalWebSocketReceptor {
     }
 
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close();
+      } catch {
+        // Ignore errors closing WebSocket (e.g. not yet connected)
+      }
       this.ws = null;
     }
 
@@ -226,9 +230,8 @@ export class SignalWebSocketReceptor {
     const mentions = dataMessage.mentions || [];
     const quote = dataMessage.quote;
 
-    // Debug: log raw mention data when message contains mention placeholder (￼)
-    if (dataMessage.message?.includes('\uFFFC') || mentions.length > 0) {
-      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Raw mentions: ${JSON.stringify(mentions)}, content: ${(dataMessage.message || '').substring(0, 60)}`);
+    if (mentions.length > 0) {
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] ${mentions.length} mention(s): ${mentions.map((m: any) => m.uuid?.substring(0, 8)).join(', ')}`);
     }
 
     // Debug logging for quote data from Signal CLI
