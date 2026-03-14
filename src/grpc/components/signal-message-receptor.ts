@@ -391,7 +391,7 @@ export class SignalMessageReceptor {
         commandText,
         this.state.runtimeConfig,
         this.updateConfig,
-        (topic, payload) => this.bot.grpcClient.emitEvent(topic, payload)
+        (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId })
       );
       if (response) {
         try {

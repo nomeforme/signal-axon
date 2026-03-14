@@ -150,6 +150,25 @@ export class SignalCommandEffector {
         return `Steering ${this.botName}: ${steerMsg}`;
       }
 
+      case '!autotrigger': {
+        const atArg = parts[1]?.toLowerCase();
+        const enable = atArg !== 'off';
+        // Check for --workflow flag
+        const wfIdx = parts.indexOf('--workflow');
+        const workflowName = wfIdx >= 0 && parts[wfIdx + 1] ? parts[wfIdx + 1] : undefined;
+        if (emitEvent) {
+          emitEvent('agent:command', {
+            type: 'autotrigger',
+            targetAgent: this.botName,
+            enable,
+            workflowName,
+          }).catch((e: any) => console.error(`[SignalCommandEffector:${this.botName}] Failed to emit autotrigger:`, e.message));
+        }
+        if (!enable) return `Autotrigger disabled for ${this.botName}`;
+        const wfMsg = workflowName ? ` (workflow: ${workflowName})` : '';
+        return `Autotrigger enabled for ${this.botName}${wfMsg} — use !stop to halt`;
+      }
+
       case '!help':
         return this.getHelpText(currentConfig);
 
@@ -182,6 +201,8 @@ export class SignalCommandEffector {
 
 !stop - Abort the current agent cycle
 !steer <message> - Redirect the running agent mid-cycle
+
+!autotrigger [on|off] [--workflow <name>] - Autonomous self-triggering loop
 
 !help - Show this help`;
   }
