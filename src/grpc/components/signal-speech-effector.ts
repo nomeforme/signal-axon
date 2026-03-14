@@ -78,9 +78,12 @@ export class SignalSpeechEffector {
 
     // Determine speaker identity
     const speakerName = facet.agentName || facet.agentId || '';
+    const agentName = this.botConfig.agentName;
 
-    // Only deliver speech that matches THIS bot's name
-    if (speakerName !== botName && facet.agentName !== botName) {
+    // Only deliver speech that matches THIS bot's name or agentName
+    const isMyBot = speakerName === botName || facet.agentName === botName
+      || (agentName && (speakerName === agentName || facet.agentName === agentName));
+    if (!isMyBot) {
       return;
     }
 

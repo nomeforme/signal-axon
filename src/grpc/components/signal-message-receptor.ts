@@ -118,6 +118,15 @@ export class SignalMessageReceptor {
     const quotedBotName = this.findQuotedBot(event.quotedMessage);
     const quotedBot = quotedBotName === botName;
 
+    // Debug logging for mention detection (only log once per message via dedup check)
+    if (event.mentions?.length && !this.state.bots.has(event.senderNumber || '')) {
+      const resolvedMentions = event.mentions.map(m => {
+        const resolved = this.state.botUuidToName.get(m.uuid);
+        return `${m.uuid.substring(0, 8)}...→${resolved || 'UNKNOWN'}`;
+      });
+      console.log(`[SignalMessageReceptor:${botName}] Mentions: [${resolvedMentions.join(', ')}] botMentioned=${botMentioned} (botUuid=${botUuid?.substring(0, 8) || 'none'})`);
+    }
+
     // Debug logging for quote detection
     if (event.quotedMessage) {
       console.log(`[SignalMessageReceptor:${botName}] Quote detected - authorUuid: ${event.quotedMessage.authorUuid}, resolved to: ${quotedBotName || 'unknown'}, isMe: ${quotedBot}`);

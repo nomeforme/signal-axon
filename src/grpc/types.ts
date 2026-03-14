@@ -19,6 +19,7 @@ export interface BotConfig {
   name: string;
   phone?: string;
   uuid?: string;
+  agentName?: string;  // from platform binding — matches bot-runtime's BOT_NAME
 }
 
 /**

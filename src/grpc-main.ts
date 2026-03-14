@@ -138,7 +138,7 @@ async function main(): Promise<void> {
   // Called both at startup (env phones) and dynamically (binding ads)
   // ========================================================================
   async function addSignalBot(
-    name: string, phone: string, uuid: string | undefined, source: string
+    name: string, phone: string, uuid: string | undefined, source: string, agentName?: string
   ): Promise<boolean> {
     if (state.bots.has(phone)) {
       console.log(`  ${name}: Already managed, skipping (${source})`);
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
       nameToUuidCache.set(name.toLowerCase(), uuid);
     }
 
-    const botConfig: BotConfig = { name, phone, uuid };
+    const botConfig: BotConfig = { name, phone, uuid, agentName };
     const bot = createBotInstance(botConfig, host, port);
     state.bots.set(phone, bot);
 
@@ -320,7 +320,8 @@ async function main(): Promise<void> {
           binding.agentName,
           phone,
           binding.credentials.uuid,
-          `binding:${binding.agentName}`
+          `binding:${binding.agentName}`,
+          binding.agentName  // pass as agentName
         );
       }
       processingBindings = false;

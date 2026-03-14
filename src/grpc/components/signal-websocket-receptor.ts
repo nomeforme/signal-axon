@@ -226,6 +226,11 @@ export class SignalWebSocketReceptor {
     const mentions = dataMessage.mentions || [];
     const quote = dataMessage.quote;
 
+    // Debug: log raw mention data when message contains mention placeholder (￼)
+    if (dataMessage.message?.includes('\uFFFC') || mentions.length > 0) {
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Raw mentions: ${JSON.stringify(mentions)}, content: ${(dataMessage.message || '').substring(0, 60)}`);
+    }
+
     // Debug logging for quote data from Signal CLI
     if (quote) {
       console.log(`[SignalWebSocketReceptor:${this.botPhone}] Raw quote data: id=${quote.id}, author=${quote.author}, authorUuid=${quote.authorUuid}, text=${quote.text?.substring(0, 30)}...`);
