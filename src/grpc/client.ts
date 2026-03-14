@@ -286,6 +286,55 @@ export class SignalGrpcClient extends EventEmitter {
   }
 
   /**
+   * Subscribe to both speech and action facets in a single gRPC stream.
+   * Used by SubstreamRelayEffector for cross-stream relay.
+   */
+  subscribeToStreamDeltas(
+    callback: (facet: any) => void,
+    options?: { streamIds?: string[] }
+  ): () => void {
+    const subOptions: SubscriptionOptions = {
+      filters: [
+        { types: ['speech', 'action'] }
+      ],
+      includeExisting: false,
+      streamIds: options?.streamIds || []
+    };
+
+    return this.client.subscribe(subOptions, (delta: FacetDelta) => {
+      if (delta.type === 'added' && delta.facet) {
+        callback(delta.facet);
+      }
+    });
+  }
+
+  /**
+   * Get stream info (including parentId) from the server via state snapshot.
+   */
+  async getStreamInfo(
+    streamId: string
+  ): Promise<{ id: string; name: string; metadata: Record<string, string>; parentId: string } | null> {
+    try {
+      const snapshot = await this.client.getStateSnapshot({
+        streamIds: [streamId],
+        facetTypes: ['__none__'],
+        timeoutMs: 10000,
+      });
+      const stream = (snapshot.streams || []).find((s: any) => s.id === streamId);
+      if (!stream) return null;
+      return {
+        id: stream.id,
+        name: stream.name || '',
+        metadata: stream.metadata || {},
+        parentId: stream.parentId || stream.parent_id || '',
+      };
+    } catch (error: any) {
+      console.error(`[SignalGrpcClient] Failed to get stream info for ${streamId}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Get rendered context for the agent
    */
   async getContext(

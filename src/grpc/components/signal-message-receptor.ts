@@ -488,14 +488,13 @@ export class SignalMessageReceptor {
 
     let cleaned = message.trim();
 
-    // Strip leading @mention if present (format: "@botname rest of message")
-    // This handles the case where user sends "@botname !help"
-    if (cleaned.startsWith('@')) {
+    // Strip ALL leading @mentions (handles "@bot1 @bot2 !stream in piday")
+    while (cleaned.startsWith('@')) {
       const spaceIndex = cleaned.indexOf(' ');
       if (spaceIndex > 0) {
         cleaned = cleaned.substring(spaceIndex + 1).trim();
       } else {
-        // Just a mention with no content
+        // Just mentions with no content
         return null;
       }
     }

@@ -34,6 +34,9 @@ export type { SignalSpeechEffectorConfig } from './signal-speech-effector.js';
 export { SignalCommandEffector } from './signal-command-effector.js';
 export type { ConfigUpdateCallback } from './signal-command-effector.js';
 
+export { SignalSubstreamRelayEffector } from './signal-substream-relay-effector.js';
+export type { SignalSubstreamRelayEffectorConfig } from './signal-substream-relay-effector.js';
+
 // Consistency checking
 export { MessageConsistencyChecker } from './message-consistency-checker.js';
 export type { MessageConsistencyConfig } from './message-consistency-checker.js';

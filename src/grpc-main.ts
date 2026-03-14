@@ -40,6 +40,7 @@ import {
   FocusedContextTransform,
   SignalSpeechEffector,
   SignalCommandEffector,
+  SignalSubstreamRelayEffector,
   MessageConsistencyChecker,
   // Utilities
   getNameToUuidCache,
@@ -108,6 +109,9 @@ async function main(): Promise<void> {
 
   // Store context transforms for runtime config updates
   const contextTransforms: FocusedContextTransform[] = [];
+
+  // Substream relay: created once after the first bot connects
+  let substreamRelay: SignalSubstreamRelayEffector | null = null;
 
   const updateRuntimeConfig = (updates: Partial<RuntimeConfig>) => {
     Object.assign(state.runtimeConfig, updates);
@@ -270,6 +274,14 @@ async function main(): Promise<void> {
     try {
       await bot.grpcClient.connect();
       wsReceptor.connect();
+
+      // Start substream relay after the first bot connects (singleton)
+      if (!substreamRelay) {
+        substreamRelay = new SignalSubstreamRelayEffector({ state });
+        substreamRelay.setup();
+        console.log(`  [SignalSubstreamRelay] Started (using ${name}'s gRPC connection)`);
+      }
+
       console.log(`  ${name}: Components initialized, connected [${source}]`);
       return true;
     } catch (error: any) {
@@ -378,6 +390,10 @@ async function main(): Promise<void> {
     }
 
     consistencyChecker.stop();
+
+    if (substreamRelay) {
+      substreamRelay.destroy();
+    }
 
     for (const [, ws] of wsHandlersMap) {
       ws.disconnect();
