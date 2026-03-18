@@ -12,7 +12,7 @@
  * 4. Sends formatted relay messages showing substream progress
  *
  * Message format:
- *   [substream:nanogpt-training] opus-4.6: <content truncated to ~500 chars>
+ *   [substream:nanogpt-training] opus-4.6: <full content, or truncated if maxRelayContentLength set>
  */
 
 import axios from 'axios';
@@ -54,7 +54,7 @@ export class SignalSubstreamRelayEffector {
 
   constructor(config: SignalSubstreamRelayEffectorConfig) {
     this.state = config.state;
-    this.maxRelayContentLength = config.maxRelayContentLength ?? 500;
+    this.maxRelayContentLength = config.maxRelayContentLength ?? 0; // 0 = unlimited
     this.debounceWindowMs = config.debounceWindowMs ?? 1500;
   }
 
@@ -144,12 +144,14 @@ export class SignalSubstreamRelayEffector {
     const parentInfo = await this.resolveParentSignal(substreamId);
     if (!parentInfo) return;
 
-    const cleaned = content.replace(/\n{3,}/g, '\n\n').trim();
-    const truncated = cleaned.length > this.maxRelayContentLength
-      ? cleaned.substring(0, this.maxRelayContentLength) + '...'
-      : cleaned;
+    let cleaned = content.replace(/\n{3,}/g, '\n\n').trim();
 
-    const message = truncated ? `[${substreamId}] ${agentName}: ${truncated}` : '';
+    // Apply configurable content limit (0 = unlimited)
+    if (this.maxRelayContentLength > 0 && cleaned.length > this.maxRelayContentLength) {
+      cleaned = cleaned.substring(0, this.maxRelayContentLength) + '...';
+    }
+
+    const message = cleaned ? `[${substreamId}] ${agentName}: ${cleaned}` : '';
 
     // Convert attachments to base64 for Signal CLI API
     const base64Attachments: string[] = [];
