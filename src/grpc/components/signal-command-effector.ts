@@ -7,6 +7,7 @@
  * - !mcf N - Set max conversation frames
  * - !mmf N - Set max memory frames
  * - !mt N - Max output tokens per response (per-bot)
+ * - !continue - Continue from the bot's last message (prefill)
  * - !stop - Abort the current agent cycle
  * - !steer <message> - Redirect the running agent with a new instruction
  * - !stream in/out <name> - Enter/exit a named substream
@@ -116,6 +117,8 @@ export class SignalCommandEffector {
 !mt [N] - Max output tokens per response (per-bot, 0=model default)
   Current: ${this.maxOutputTokensOverride ?? 'model default'}
 
+!continue - Continue from the bot's last message (prefill)
+  Also: m continue, m go, m more
 !stop - Abort the current agent cycle
 !steer <message> - Redirect the running agent mid-cycle
 

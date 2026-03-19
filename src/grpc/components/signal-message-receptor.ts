@@ -371,9 +371,9 @@ export class SignalMessageReceptor {
     // Log activation
     console.log(`[SignalMessageReceptor:${botName}] Activating for message from ${event.sender}: ${readableContent.substring(0, 50)}... (${activationReason})`);
 
-    // Handle "m continue" — continuation command (resume truncated bot output)
+    // Handle !continue / m continue — continuation command (resume truncated bot output)
     const contentStripped = readableContent.replace(/^@\S+\s+/, '').trim();
-    if (/^m\s+(continue|go|more)\b/i.test(contentStripped)) {
+    if (/^[!]continue\b/i.test(contentStripped) || /^m\s+(continue|go|more)\b/i.test(contentStripped)) {
       console.log(`[SignalMessageReceptor:${botName}] Continuation command detected`);
 
       // Activate the agent with continuation flag — skip normal message flow
