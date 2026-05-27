@@ -314,6 +314,18 @@ export class SignalMessageReceptor {
     let shouldActivate = false;
     let activationReason = '';
 
+    // Defensive guard: never activate on an empty message with no attachments.
+    // Contentless artifacts (reactions, receipts, sync/profile updates) should
+    // already be filtered upstream in the websocket receptor, but this ensures
+    // no path — especially the unconditional DM branch below — can fire an
+    // unsolicited "your message came through empty" reply.
+    const hasActionableContent =
+      !!readableContent.trim() || (event.attachments?.length ?? 0) > 0;
+    if (!hasActionableContent) {
+      console.log(`[SignalMessageReceptor:${botName}] Skipping activation: empty message, no attachments (likely reaction/receipt/sync)`);
+      return;
+    }
+
     if (botMentioned) {
       // This bot was mentioned - activate
       if (this.hasProcessed(messageId)) {

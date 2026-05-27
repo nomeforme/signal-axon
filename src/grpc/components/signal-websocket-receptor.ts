@@ -230,6 +230,27 @@ export class SignalWebSocketReceptor {
     const mentions = dataMessage.mentions || [];
     const quote = dataMessage.quote;
 
+    // Skip non-actionable dataMessages. Signal wraps reactions, receipts, and
+    // various sync/profile artifacts in `dataMessage` envelopes that carry no
+    // text body, no attachments, no mention, and no quote. These must NOT be
+    // forwarded as "messages" — when such an artifact lacks group metadata it
+    // falls through to the DM branch downstream and triggers an unsolicited
+    // "your message came through empty" reply straight into a user's DMs.
+    // Edits and remote-deletes are handled by their own envelope branches.
+    const hasText = !!(dataMessage.message && String(dataMessage.message).trim());
+    const hasAttachments = Array.isArray(dataMessage.attachments) && dataMessage.attachments.length > 0;
+    const hasMention = mentions.length > 0;
+    const hasQuote = !!quote;
+    if (!hasText && !hasAttachments && !hasMention && !hasQuote) {
+      const kind = dataMessage.reaction
+        ? 'reaction'
+        : dataMessage.groupInfo && !dataMessage.message
+          ? 'group-update'
+          : 'contentless';
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] Skipping non-actionable dataMessage (${kind}) from ${sourceUuid?.substring(0, 8) || source}`);
+      return;
+    }
+
     if (mentions.length > 0) {
       console.log(`[SignalWebSocketReceptor:${this.botPhone}] ${mentions.length} mention(s): ${mentions.map((m: any) => m.uuid?.substring(0, 8)).join(', ')}`);
     }
