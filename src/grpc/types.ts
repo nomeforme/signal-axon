@@ -31,6 +31,15 @@ export interface RuntimeConfig {
   maxConversationFrames: number;
   maxMemoryFrames: number;
   groupPrivacyMode: 'opt-in' | 'opt-out';
+  /**
+   * Outbound message split threshold (characters).
+   * - N > 0:  split at N chars on paragraph/sentence/word boundaries (default 400)
+   * - 0:      "native" mode — send the whole message in one shot up to Signal's
+   *           hard ~4096-char limit, letting Signal's built-in "see more" handle
+   *           the display rather than fragmenting into many sub-messages.
+   * Tunable at runtime via `!split [N|auto|native|off]`.
+   */
+  messageSplitThreshold: number;
 }
 
 /**

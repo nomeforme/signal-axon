@@ -7,6 +7,7 @@
  * - !mcf N - Set max conversation frames
  * - !mmf N - Set max memory frames
  * - !mt N - Max output tokens per response (per-bot)
+ * - !split [N|auto|native|off] - Outbound message split threshold (axon-wide)
  * - !continue - Continue from the bot's last message (prefill)
  * - !stop - Abort the current agent cycle
  * - !steer <message> - Redirect the running agent with a new instruction
@@ -29,13 +30,21 @@ export type EmitEventCallback = (topic: string, payload: Record<string, any>) =>
  *
  * Constraint equivalent: EFFECTOR priority (but synchronous, returns immediately)
  */
+export interface SignalCommandEffectorOptions {
+  /** Default messageSplitThreshold (from env / operational config) — what `!split auto` restores. */
+  messageSplitThresholdDefault: number;
+}
+
 export class SignalCommandEffector {
   private botName: string;
   /** Tracks the last-set maxOutputTokens override (axon-local, per command effector instance) */
   private maxOutputTokensOverride: number | undefined;
+  /** Default value for `!split auto` — captured at axon startup. */
+  private messageSplitThresholdDefault: number;
 
-  constructor(botName: string) {
+  constructor(botName: string, opts: SignalCommandEffectorOptions) {
     this.botName = botName;
+    this.messageSplitThresholdDefault = opts.messageSplitThresholdDefault;
   }
 
   /**
@@ -86,6 +95,9 @@ export class SignalCommandEffector {
       case '!mt':
         return this.handleMaxTokens(args, emitEvent);
 
+      case '!split':
+        return this.handleSplit(args, currentConfig, updateConfig);
+
       case '!stop':
         return this.handleStop(emitEvent);
 
@@ -123,6 +135,12 @@ export class SignalCommandEffector {
 
 !mt [N] - Max output tokens per response (per-bot, 0=model default)
   Current: ${this.maxOutputTokensOverride ?? 'model default'}
+
+!split [N|auto|native|off] - Outbound message split threshold (axon-wide)
+  N         → split long replies at N chars on paragraph/sentence/word boundaries
+  auto      → restore the env default (${this.messageSplitThresholdDefault})
+  native|off → no aggressive split — send full message, let Signal's "see more" handle it
+  Current: ${config.messageSplitThreshold === 0 ? 'native (no split)' : `${config.messageSplitThreshold} chars`}
 
 !continue - Continue from the bot's last message (prefill)
   Also: m continue, m go, m more
@@ -311,6 +329,53 @@ export class SignalCommandEffector {
       return `Max output tokens for ${this.botName} reset to model default`;
     }
     return `Max output tokens for ${this.botName} set to ${value}`;
+  }
+
+  /**
+   * Handle !split — outbound message split threshold (axon-wide, runtime-tunable).
+   *
+   * Usage:
+   *   !split             → show current threshold
+   *   !split N           → split long replies at N chars (paragraph/sentence/word breaks)
+   *   !split auto        → restore the env-configured default
+   *   !split native      → disable splitting (whole message in one shot, "see more" handles display)
+   *   !split off         → alias for native
+   *   !split 0           → alias for native
+   */
+  private handleSplit(
+    args: string,
+    currentConfig: RuntimeConfig,
+    updateConfig: ConfigUpdateCallback
+  ): string {
+    if (!args) {
+      const cur = currentConfig.messageSplitThreshold;
+      if (cur === 0) {
+        return `Message split: native (no aggressive splitting; Signal "see more" handles long messages). Default: ${this.messageSplitThresholdDefault} chars.`;
+      }
+      return `Message split threshold: ${cur} chars. Default: ${this.messageSplitThresholdDefault} chars.`;
+    }
+
+    const arg = args.toLowerCase();
+    let newThreshold: number;
+
+    if (arg === 'auto') {
+      newThreshold = this.messageSplitThresholdDefault;
+    } else if (arg === 'native' || arg === 'off') {
+      newThreshold = 0;
+    } else {
+      const n = parseInt(arg, 10);
+      if (isNaN(n) || n < 0) {
+        return 'Invalid value. Use: !split N (N>=0) | !split auto | !split native | !split off';
+      }
+      newThreshold = n;
+    }
+
+    updateConfig({ messageSplitThreshold: newThreshold });
+
+    if (newThreshold === 0) {
+      return 'Message split disabled — full message sent in one shot (capped at Signal\'s 4096 limit). Users will see "see more" for long content.';
+    }
+    return `Message split threshold set to ${newThreshold} chars.`;
   }
 
   private handleStop(emitEvent?: EmitEventCallback): string {

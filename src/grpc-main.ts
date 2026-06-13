@@ -103,7 +103,8 @@ async function main(): Promise<void> {
       maxBotMentionsPerConversation: operationalConfig.maxBotMentionsPerConversation,
       maxConversationFrames: operationalConfig.maxConversationFrames,
       maxMemoryFrames: operationalConfig.maxMemoryFrames,
-      groupPrivacyMode: operationalConfig.groupPrivacyMode
+      groupPrivacyMode: operationalConfig.groupPrivacyMode,
+      messageSplitThreshold: operationalConfig.maxMessageLength
     }
   };
 
@@ -180,7 +181,7 @@ async function main(): Promise<void> {
       botConfig: bot.config,
       streamManager: bot.streamManager,
       managedBotNames,
-      maxMessageLength: operationalConfig.maxMessageLength
+      runtimeConfig: state.runtimeConfig
     });
     speechEffector.setup();
 
@@ -192,7 +193,9 @@ async function main(): Promise<void> {
     });
     contextTransforms.push(contextTransform);
 
-    const commandEffector = new SignalCommandEffector(name);
+    const commandEffector = new SignalCommandEffector(name, {
+      messageSplitThresholdDefault: operationalConfig.maxMessageLength
+    });
 
     const messageReceptor = new SignalMessageReceptor({
       bot, state, commandEffector, updateConfig: updateRuntimeConfig

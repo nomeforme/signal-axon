@@ -13,14 +13,27 @@ import axios from 'axios';
 import { cleanSpeechContent, splitMessage, detectAndConvertMentions, getNameToPhoneCache, convertGroupId } from '../utils/index.js';
 import { getSignalCliConfig } from '../config-loader.js';
 import type { StreamManager, StreamInfo } from '../stream-manager.js';
-import type { BotConfig } from '../types.js';
+import type { BotConfig, RuntimeConfig } from '../types.js';
+
+/**
+ * Signal's hard per-message length cap (4096 chars). When messageSplitThreshold
+ * is 0 ("native" mode), we still pass this to splitMessage as the maxLength so
+ * a runaway 8000-char message gets safely split into 2 instead of 400 — but
+ * normal-length messages send as one chunk, letting Signal's built-in "see more"
+ * handle the display.
+ */
+const SIGNAL_HARD_MESSAGE_LIMIT = 4096;
 
 export interface SignalSpeechEffectorConfig {
   botConfig: BotConfig;
   streamManager: StreamManager;
   /** Set of bot names managed by this axon (discovered on startup) */
   managedBotNames: Set<string>;
-  maxMessageLength?: number;
+  /**
+   * Shared runtime config — read live each speech delivery so `!split` updates
+   * take effect immediately without restarting the axon.
+   */
+  runtimeConfig: RuntimeConfig;
 }
 
 /**
@@ -32,13 +45,13 @@ export class SignalSpeechEffector {
   private botConfig: BotConfig;
   private streamManager: StreamManager;
   private managedBotNames: Set<string>;
-  private maxMessageLength?: number;
+  private runtimeConfig: RuntimeConfig;
 
   constructor(config: SignalSpeechEffectorConfig) {
     this.botConfig = config.botConfig;
     this.streamManager = config.streamManager;
     this.managedBotNames = config.managedBotNames;
-    this.maxMessageLength = config.maxMessageLength;
+    this.runtimeConfig = config.runtimeConfig;
   }
 
   /**
@@ -113,8 +126,13 @@ export class SignalSpeechEffector {
         }
       }
 
+      // Determine split threshold live: 0 = native mode (no aggressive splitting,
+      // just cap at Signal's hard 4096 limit for safety on runaway messages).
+      const threshold = this.runtimeConfig.messageSplitThreshold;
+      const effectiveMax = threshold > 0 ? threshold : SIGNAL_HARD_MESSAGE_LIMIT;
+
       // Split if too long — ensure at least one chunk for attachment-only messages
-      const chunks = contentWithMentions ? splitMessage(contentWithMentions, this.maxMessageLength) : (base64Attachments.length > 0 ? [''] : []);
+      const chunks = contentWithMentions ? splitMessage(contentWithMentions, effectiveMax) : (base64Attachments.length > 0 ? [''] : []);
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
