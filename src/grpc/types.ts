@@ -96,7 +96,10 @@ export interface SignalAttachment {
   contentType?: string;
   filename?: string;
   size?: number;
-  data?: string;  // base64 encoded
+  /** Legacy: base64-encoded bytes. Preferred path uses blobId. */
+  data?: string;
+  /** Content-addressed sha256 ref into the Connectome blob store. */
+  blobId?: string;
 }
 
 /**

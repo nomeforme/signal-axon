@@ -181,7 +181,8 @@ async function main(): Promise<void> {
       botConfig: bot.config,
       streamManager: bot.streamManager,
       managedBotNames,
-      runtimeConfig: state.runtimeConfig
+      runtimeConfig: state.runtimeConfig,
+      grpcClient: bot.grpcClient,
     });
     speechEffector.setup();
 

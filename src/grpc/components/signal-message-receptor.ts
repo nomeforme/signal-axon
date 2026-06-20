@@ -273,6 +273,14 @@ export class SignalMessageReceptor {
           }
         );
 
+        // Upload inline attachment bytes to the content-addressed blob store
+        // BEFORE emitting the signal:message event. Only the lottery-winning
+        // bot reaches this point per message, so each unique image hits PutBlob
+        // exactly once (and dedup makes re-uploads of the same sha free anyway).
+        // The emit payload then carries refs instead of bytes, so the subsequent
+        // fan-out broadcast across all subscribers stays metadata-only.
+        const uploadedAttachments = await this.uploadAttachmentsToBlobStore(event.attachments, botName);
+
         // Emit message to Connectome (creates facet in VEIL for context)
         await this.bot.grpcClient.emitSignalMessage({
           content: readableContent,
@@ -283,7 +291,7 @@ export class SignalMessageReceptor {
           groupName: event.groupName,
           botPhone,
           timestamp: event.timestamp,
-          attachments: event.attachments,
+          attachments: uploadedAttachments,
           mentions: event.mentions,
           quotedMessage: event.quotedMessage
         });
@@ -484,6 +492,55 @@ export class SignalMessageReceptor {
     } catch (error: any) {
       console.error(`[SignalMessageReceptor:${botName}] Error activating agent:`, error.message);
     }
+  }
+
+  /**
+   * Replace inline attachment bytes with sha256 blob refs by uploading each
+   * to the Connectome content-addressed store. Falls back to the original
+   * inline shape on upload failure so the message still reaches the bot.
+   *
+   * Attachments lacking `data` (metadata-only, e.g. too-large or missing-id
+   * cases from the websocket receptor) pass through unchanged.
+   */
+  private async uploadAttachmentsToBlobStore(
+    attachments: SignalMessageEvent['attachments'],
+    botName: string
+  ): Promise<SignalMessageEvent['attachments']> {
+    if (!attachments || attachments.length === 0) return attachments;
+
+    const uploaded = await Promise.all(
+      attachments.map(async (att) => {
+        // Metadata-only or no inline payload — nothing to upload
+        if (!att.data) return att;
+
+        try {
+          const bytes = Buffer.from(att.data, 'base64');
+          const result = await this.bot.grpcClient.putBlob(new Uint8Array(bytes), {
+            contentType: att.contentType || 'application/octet-stream',
+            filename: att.filename,
+          });
+          if (result.alreadyExisted) {
+            console.log(`[SignalMessageReceptor:${botName}] Blob ${result.blobId.substring(0, 12)}... already in store (dedup hit, ${bytes.length} bytes)`);
+          } else {
+            console.log(`[SignalMessageReceptor:${botName}] Uploaded blob ${result.blobId.substring(0, 12)}... (${bytes.length} bytes, ${att.contentType})`);
+          }
+          // Return ref-only attachment; bytes now live in the blob store.
+          // `data` is omitted (so the JSON event payload is tiny).
+          return {
+            id: att.id,
+            contentType: att.contentType,
+            filename: att.filename,
+            size: att.size ?? bytes.length,
+            blobId: result.blobId,
+          };
+        } catch (err: any) {
+          console.warn(`[SignalMessageReceptor:${botName}] Blob upload failed for ${att.filename || att.id}: ${err.message} — falling back to inline bytes`);
+          return att;
+        }
+      })
+    );
+
+    return uploaded;
   }
 
   /**

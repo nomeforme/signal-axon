@@ -409,6 +409,33 @@ export class SignalGrpcClient extends EventEmitter {
   }
 
   /**
+   * Upload binary bytes to the Connectome blob store.
+   * Returns sha256 blob_id. Idempotent (alreadyExisted=true on dedup hit).
+   *
+   * Used by the message receptor to upload inbound platform attachments
+   * before emitting a signal:message event with refs instead of bytes.
+   */
+  async putBlob(
+    bytes: Uint8Array,
+    options: { contentType: string; filename?: string; timeoutMs?: number } = { contentType: 'application/octet-stream' }
+  ): Promise<{ blobId: string; sizeBytes: number; alreadyExisted: boolean }> {
+    return this.client.putBlob(bytes, options);
+  }
+
+  /**
+   * Download a blob by its sha256 id. Throws NOT_FOUND if unknown.
+   *
+   * Used by the speech effector to pull outbound attachment bytes right
+   * before delivering to signal-cli.
+   */
+  async getBlob(
+    blobId: string,
+    options: { timeoutMs?: number } = {}
+  ): Promise<{ blobId: string; sizeBytes: number; contentType: string; filename: string; bytes: Uint8Array }> {
+    return this.client.getBlob(blobId, options);
+  }
+
+  /**
    * Activate agent for a stream
    */
   async activateAgent(

@@ -13,6 +13,7 @@ import axios from 'axios';
 import { cleanSpeechContent, splitMessage, detectAndConvertMentions, getNameToPhoneCache, convertGroupId } from '../utils/index.js';
 import { getSignalCliConfig } from '../config-loader.js';
 import type { StreamManager, StreamInfo } from '../stream-manager.js';
+import type { SignalGrpcClient } from '../client.js';
 import type { BotConfig, RuntimeConfig } from '../types.js';
 
 /**
@@ -34,6 +35,8 @@ export interface SignalSpeechEffectorConfig {
    * take effect immediately without restarting the axon.
    */
   runtimeConfig: RuntimeConfig;
+  /** gRPC client — used to resolve content-addressed attachment blob refs. */
+  grpcClient: SignalGrpcClient;
 }
 
 /**
@@ -46,12 +49,14 @@ export class SignalSpeechEffector {
   private streamManager: StreamManager;
   private managedBotNames: Set<string>;
   private runtimeConfig: RuntimeConfig;
+  private grpcClient: SignalGrpcClient;
 
   constructor(config: SignalSpeechEffectorConfig) {
     this.botConfig = config.botConfig;
     this.streamManager = config.streamManager;
     this.managedBotNames = config.managedBotNames;
     this.runtimeConfig = config.runtimeConfig;
+    this.grpcClient = config.grpcClient;
   }
 
   /**
@@ -115,14 +120,34 @@ export class SignalSpeechEffector {
         getNameToPhoneCache()
       );
 
-      // Build base64 attachments array from facet
+      // Build base64 attachments array from facet.
+      //
+      // Three possible transport modes per attachment:
+      //  - blobId (preferred): pull bytes from the Connectome blob store via
+      //    GetBlob, then base64-encode for signal-cli. Bytes never travelled
+      //    through the FacetDelta broadcast — only the sha ref did.
+      //  - data as Uint8Array: legacy inline path; convert to base64.
+      //  - data as string: already base64.
       const base64Attachments: string[] = [];
       if (facet.attachments?.length) {
         for (const att of facet.attachments) {
-          const b64 = att.data instanceof Uint8Array
-            ? Buffer.from(att.data).toString('base64')
-            : att.data;  // already base64
-          base64Attachments.push(b64);
+          let b64: string | null = null;
+
+          if (att.blobId) {
+            try {
+              const blob = await this.grpcClient.getBlob(att.blobId);
+              b64 = Buffer.from(blob.bytes).toString('base64');
+            } catch (err: any) {
+              console.warn(`[SignalSpeechEffector:${botName}] Failed to resolve blob ${att.blobId.substring(0, 12)}...: ${err.message} — dropping attachment`);
+              continue;
+            }
+          } else if (att.data instanceof Uint8Array) {
+            b64 = Buffer.from(att.data).toString('base64');
+          } else if (typeof att.data === 'string') {
+            b64 = att.data;
+          }
+
+          if (b64) base64Attachments.push(b64);
         }
       }
 
