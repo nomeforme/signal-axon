@@ -416,11 +416,19 @@ export class SignalMessageReceptor {
     // Handle ! commands
     const commandText = this.parseCommand(readableContent);
     if (commandText) {
+      // For !sysprompt, pre-resolve the first text/* attachment to a UTF-8
+      // string so the effector can install it without needing a gRPC client.
+      let sysPromptFileText: string | undefined;
+      if (commandText.toLowerCase().startsWith('!sysprompt') && event.attachments && event.attachments.length > 0) {
+        sysPromptFileText = await this.resolveSysPromptAttachment(event.attachments);
+      }
+
       const response = this.commandEffector.handleCommand(
         commandText,
         this.state.runtimeConfig,
         this.updateConfig,
-        (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId })
+        (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId }),
+        sysPromptFileText,
       );
       if (response) {
         try {
@@ -492,6 +500,66 @@ export class SignalMessageReceptor {
     } catch (error: any) {
       console.error(`[SignalMessageReceptor:${botName}] Error activating agent:`, error.message);
     }
+  }
+
+  /**
+   * Resolve the first text/* attachment to a UTF-8 string for `!sysprompt file`.
+   *
+   * Handles both transport modes:
+   *  - inline `data` (base64 from the WS receptor)
+   *  - `blobId` ref (pulled via ConnectomeClient.getBlob)
+   *
+   * Returns undefined if no suitable attachment is present or resolution
+   * fails. Never throws — sysprompt is best-effort UX.
+   */
+  private async resolveSysPromptAttachment(
+    attachments: NonNullable<SignalMessageEvent['attachments']>,
+  ): Promise<string | undefined> {
+    const MAX_TEXT_BYTES = 64 * 1024;
+    const botName = this.bot.config.name;
+
+    for (const att of attachments) {
+      const ct = (att.contentType || '').toLowerCase();
+      const nameLower = (att.filename || '').toLowerCase();
+      const isText =
+        ct.startsWith('text/') ||
+        /\.(txt|md|markdown|prompt)$/i.test(nameLower);
+      if (!isText) continue;
+      const declaredSize = att.size ?? 0;
+      if (declaredSize > MAX_TEXT_BYTES) {
+        console.warn(
+          `[SignalMessageReceptor:${botName}] Skipping sysprompt attachment ${att.filename}: ${declaredSize} bytes > ${MAX_TEXT_BYTES} limit`,
+        );
+        continue;
+      }
+
+      try {
+        let bytes: Uint8Array | null = null;
+        if (att.data) {
+          bytes = Uint8Array.from(Buffer.from(att.data, 'base64'));
+        } else if (att.blobId) {
+          const blob = await this.bot.grpcClient.getBlob(att.blobId);
+          bytes = blob.bytes;
+        }
+        if (!bytes) continue;
+        if (bytes.length > MAX_TEXT_BYTES) {
+          console.warn(
+            `[SignalMessageReceptor:${botName}] Sysprompt attachment resolved size ${bytes.length} > ${MAX_TEXT_BYTES} limit`,
+          );
+          continue;
+        }
+        const text = Buffer.from(bytes).toString('utf8');
+        console.log(
+          `[SignalMessageReceptor:${botName}] Resolved sysprompt attachment ${att.filename || '?'} (${text.length} chars)`,
+        );
+        return text;
+      } catch (err: any) {
+        console.warn(
+          `[SignalMessageReceptor:${botName}] Sysprompt attachment resolution error: ${err.message}`,
+        );
+      }
+    }
+    return undefined;
   }
 
   /**

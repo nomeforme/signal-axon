@@ -16,11 +16,17 @@
  * - !help - Show help
  */
 
-import { mkdirSync, writeFileSync, unlinkSync, readdirSync } from 'fs';
+import { mkdirSync, writeFileSync, unlinkSync, readdirSync, existsSync, readFileSync, renameSync } from 'fs';
 import { join } from 'path';
 import type { RuntimeConfig } from '../types.js';
 
 const SECRETS_DIR = '/workspace/shared/secrets';
+/**
+ * Overlay directory for per-bot system-prompt overrides. Mounted rw only in
+ * axon containers; bot-runtimes get it read-only.
+ */
+const OVERLAY_DIR = process.env.BOT_CONFIG_OVERRIDES_DIR || '/workspace/bot-config-overrides';
+const MAX_SYSPROMPT_BYTES = 32 * 1024;
 
 export type ConfigUpdateCallback = (updates: Partial<RuntimeConfig>) => void;
 export type EmitEventCallback = (topic: string, payload: Record<string, any>) => Promise<any>;
@@ -64,7 +70,13 @@ export class SignalCommandEffector {
     content: string,
     currentConfig: RuntimeConfig,
     updateConfig: ConfigUpdateCallback,
-    emitEvent?: EmitEventCallback
+    emitEvent?: EmitEventCallback,
+    /**
+     * Pre-resolved text content of an attached file, used by
+     * `!sysprompt <mode> file`. Receptor resolves inline data / blob refs to
+     * a UTF-8 string before calling us, keeping handleCommand synchronous.
+     */
+    sysPromptFileText?: string,
   ): string | null {
     // Preserve original case for args — only lowercase the command
     let cleaned = content.trim();
@@ -123,6 +135,9 @@ export class SignalCommandEffector {
       case '!tts':
         return this.handleTTS(args, emitEvent);
 
+      case '!sysprompt':
+        return this.handleSysPrompt(args, emitEvent, sysPromptFileText);
+
       default:
         return null; // Not a recognized command
     }
@@ -173,6 +188,13 @@ export class SignalCommandEffector {
   Attaches synthesized voice audio to the bot's final message.
   Only works on bots configured with a TTS provider.
   Current: ${this.ttsEnabledOverride === undefined ? 'bot-config default' : (this.ttsEnabledOverride ? 'on' : 'off')}
+
+!sysprompt [temp|override] <text|file> - Live-update system prompt (per-bot)
+  temp     = in-memory only (discarded on restart)
+  override = in-memory + persisted overlay (survives restart)
+  file     = read prompt from an attached text file (.txt/.md)
+  !sysprompt reset = delete overlay + revert to config.json baseline
+  No argument shows the current persisted override (if any)
 
 !secret <name> <value> - Store a secret (never reaches VEIL)
   !secret list - List stored secret names
@@ -394,6 +416,120 @@ export class SignalCommandEffector {
     }
 
     return `TTS for ${this.botName} ${enabled ? 'enabled' : 'disabled'} (no effect if bot has no TTS provider)`;
+  }
+
+  /**
+   * !sysprompt — live-update the bot's system prompt.
+   *
+   * See DiscordCommandEffector.handleSysPrompt for full semantics — same
+   * behavior, same overlay path, same `bot:config { systemPrompt }` route.
+   */
+  private handleSysPrompt(
+    args: string,
+    emitEvent?: EmitEventCallback,
+    sysPromptFileText?: string,
+  ): string {
+    const trimmed = args.trim();
+
+    if (!trimmed) {
+      return this.showSysPromptStatus();
+    }
+
+    const parts = trimmed.split(/\s+/);
+    const mode = parts[0].toLowerCase();
+    const rest = parts.slice(1).join(' ').trim();
+
+    if (mode === 'reset') {
+      this.deleteOverlay();
+      if (emitEvent) {
+        emitEvent('bot:config', {
+          targetAgent: this.botName,
+          systemPrompt: null,
+        }).catch((e: any) =>
+          console.error(`[SignalCommandEffector:${this.botName}] Failed to emit sysprompt reset:`, e.message),
+        );
+      }
+      return `System prompt for ${this.botName} reset — bot-runtime will revert to config.json baseline on next activation.`;
+    }
+
+    if (mode !== 'temp' && mode !== 'override') {
+      return 'Usage: !sysprompt [temp|override] <text|file>  |  !sysprompt reset';
+    }
+
+    let text: string;
+    if (rest === 'file' || (rest === '' && sysPromptFileText)) {
+      if (!sysPromptFileText) {
+        return 'No text attachment found. Attach a text file (.txt/.md) and repeat the command.';
+      }
+      text = sysPromptFileText.trim();
+    } else if (rest.length > 0) {
+      text = rest;
+    } else {
+      return `Usage: !sysprompt ${mode} <text>  |  !sysprompt ${mode} file (with attached text file)`;
+    }
+
+    if (!text) return 'Prompt content is empty.';
+    const byteLen = Buffer.byteLength(text, 'utf8');
+    if (byteLen > MAX_SYSPROMPT_BYTES) {
+      return `Prompt too long (${byteLen} bytes, max ${MAX_SYSPROMPT_BYTES}).`;
+    }
+
+    if (mode === 'override') {
+      try {
+        this.writeOverlay(text);
+      } catch (err: any) {
+        return `Failed to persist overlay for ${this.botName}: ${err.message}`;
+      }
+    }
+
+    if (emitEvent) {
+      emitEvent('bot:config', {
+        targetAgent: this.botName,
+        systemPrompt: text,
+      }).catch((e: any) =>
+        console.error(`[SignalCommandEffector:${this.botName}] Failed to emit sysprompt:`, e.message),
+      );
+    }
+
+    const modeLabel = mode === 'override' ? 'persisted (survives restart)' : 'temporary (in-memory only)';
+    const preview = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    return `System prompt for ${this.botName} updated — ${modeLabel}, ${text.length} chars.\n${preview}`;
+  }
+
+  private showSysPromptStatus(): string {
+    const overlayPath = join(OVERLAY_DIR, `${this.botName}.json`);
+    try {
+      if (existsSync(overlayPath)) {
+        const overlay = JSON.parse(readFileSync(overlayPath, 'utf8'));
+        if (overlay?.prompt && typeof overlay.prompt === 'string') {
+          const preview =
+            overlay.prompt.length > 400 ? `${overlay.prompt.slice(0, 400)}…` : overlay.prompt;
+          const ts = overlay.updatedAt ? new Date(overlay.updatedAt).toISOString() : 'unknown';
+          return `System prompt for ${this.botName} — persisted override (${overlay.prompt.length} chars, updated ${ts}):\n${preview}`;
+        }
+      }
+    } catch (err: any) {
+      return `Failed to read overlay for ${this.botName}: ${err.message}`;
+    }
+    return `System prompt for ${this.botName}: using config.json baseline (no persistent override). Temporary in-memory overrides are not readable from the axon.`;
+  }
+
+  private writeOverlay(prompt: string): void {
+    try { mkdirSync(OVERLAY_DIR, { recursive: true }); } catch { /* exists */ }
+    const overlayPath = join(OVERLAY_DIR, `${this.botName}.json`);
+    const tmpPath = `${overlayPath}.tmp`;
+    const body = JSON.stringify({ prompt, updatedAt: Date.now() }, null, 2);
+    writeFileSync(tmpPath, body, { mode: 0o644 });
+    renameSync(tmpPath, overlayPath);
+    console.log(`[SignalCommandEffector:${this.botName}] Persisted sysprompt overlay to ${overlayPath} (${prompt.length} chars)`);
+  }
+
+  private deleteOverlay(): void {
+    const overlayPath = join(OVERLAY_DIR, `${this.botName}.json`);
+    try {
+      unlinkSync(overlayPath);
+      console.log(`[SignalCommandEffector:${this.botName}] Deleted sysprompt overlay ${overlayPath}`);
+    } catch { /* not present */ }
   }
 
   private handleMaxTokens(args: string, emitEvent?: EmitEventCallback): string {
