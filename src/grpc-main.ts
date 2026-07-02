@@ -268,7 +268,31 @@ async function main(): Promise<void> {
         } catch (error: any) {
           console.error(`[SignalAxon:${name}] Error emitting messageDelete:`, error.message);
         }
-      }
+      },
+      onReaction: async (event) => {
+        // Deduplicate in groups — every bot's WS sees the reaction, only one
+        // should forward. DMs are bot-specific, no dedupe needed.
+        const isGroup = !!event.groupId;
+        const dedupeKey = `reaction-${event.userId}-${event.targetAuthorId}-${event.targetTimestamp}-${event.emoji}-${event.added ? 'a' : 'r'}`;
+        if (isGroup && !messageDeduplicator.shouldEmit(dedupeKey, phone, true)) {
+          return;
+        }
+        try {
+          await bot.grpcClient.emitSignalReaction({
+            emoji: event.emoji,
+            userId: event.userId,
+            targetAuthorId: event.targetAuthorId,
+            targetTimestamp: event.targetTimestamp,
+            groupId: event.groupId,
+            botPhone: phone,
+            added: event.added,
+            timestamp: event.timestamp,
+          });
+          console.log(`[SignalAxon:${name}] Emitted reaction ${event.emoji} ${event.added ? '+' : '-'} on ts=${event.targetTimestamp}`);
+        } catch (error: any) {
+          console.error(`[SignalAxon:${name}] Error emitting reaction:`, error.message);
+        }
+      },
     });
 
     wsHandlersMap.set(phone, wsReceptor);

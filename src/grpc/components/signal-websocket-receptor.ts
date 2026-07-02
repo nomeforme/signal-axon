@@ -54,6 +54,18 @@ export interface SignalWebSocketReceptorConfig {
   onTyping: (typing: SignalTypingEvent) => Promise<void>;
   onEdit?: (event: SignalEditEvent) => Promise<void>;
   onDelete?: (event: SignalDeleteEvent) => Promise<void>;
+  onReaction?: (event: SignalReactionEvent) => Promise<void>;
+}
+
+export interface SignalReactionEvent {
+  emoji: string;
+  userId: string;             // reactor's UUID (sourceUuid of the reaction envelope)
+  targetAuthorId: string;     // UUID of the message the reaction is on
+  targetTimestamp: number;    // sentTimestamp of the target message
+  groupId?: string;
+  botPhone: string;
+  added: boolean;             // false when the reaction is being removed
+  timestamp: number;
 }
 
 export interface SignalReceiptEvent {
@@ -97,6 +109,7 @@ export class SignalWebSocketReceptor {
   private onTyping: (typing: SignalTypingEvent) => Promise<void>;
   private onEdit?: (event: SignalEditEvent) => Promise<void>;
   private onDelete?: (event: SignalDeleteEvent) => Promise<void>;
+  private onReaction?: (event: SignalReactionEvent) => Promise<void>;
 
   constructor(config: SignalWebSocketReceptorConfig) {
     this.wsUrl = config.wsUrl;
@@ -109,6 +122,7 @@ export class SignalWebSocketReceptor {
     this.onTyping = config.onTyping;
     this.onEdit = config.onEdit;
     this.onDelete = config.onDelete;
+    this.onReaction = config.onReaction;
   }
 
   /**
@@ -230,6 +244,14 @@ export class SignalWebSocketReceptor {
     const mentions = dataMessage.mentions || [];
     const quote = dataMessage.quote;
 
+    // Reactions arrive as a dataMessage with a `.reaction` field. Forward them
+    // separately (they used to be silently dropped) so the connectome server
+    // can act on 🫥 redaction reactions.
+    if (dataMessage.reaction) {
+      await this.handleReactionMessage(env);
+      return;
+    }
+
     // Skip non-actionable dataMessages. Signal wraps reactions, receipts, and
     // various sync/profile artifacts in `dataMessage` envelopes that carry no
     // text body, no attachments, no mention, and no quote. These must NOT be
@@ -242,11 +264,9 @@ export class SignalWebSocketReceptor {
     const hasMention = mentions.length > 0;
     const hasQuote = !!quote;
     if (!hasText && !hasAttachments && !hasMention && !hasQuote) {
-      const kind = dataMessage.reaction
-        ? 'reaction'
-        : dataMessage.groupInfo && !dataMessage.message
-          ? 'group-update'
-          : 'contentless';
+      const kind = dataMessage.groupInfo && !dataMessage.message
+        ? 'group-update'
+        : 'contentless';
       console.log(`[SignalWebSocketReceptor:${this.botPhone}] Skipping non-actionable dataMessage (${kind}) from ${sourceUuid?.substring(0, 8) || source}`);
       return;
     }
@@ -287,6 +307,56 @@ export class SignalWebSocketReceptor {
       await this.onMessage(event);
     } catch (error) {
       console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error handling message:`, error);
+    }
+  }
+
+  /**
+   * Handle a reaction dataMessage.
+   *
+   * Signal reactions arrive with:
+   *   dataMessage.reaction = {
+   *     emoji,                          // e.g. "🫥"
+   *     targetAuthor / targetAuthorUuid,// the reacted-to message's author
+   *     targetSentTimestamp,            // the reacted-to message's timestamp
+   *     isRemove                        // true when user is removing the reaction
+   *   }
+   *
+   * We only forward if a consumer is wired (onReaction). Groups vs DMs are
+   * distinguished by groupInfo.groupId presence.
+   */
+  private async handleReactionMessage(env: any): Promise<void> {
+    if (!this.onReaction) return;
+    const dataMessage = env.dataMessage;
+    const reaction = dataMessage.reaction;
+    if (!reaction || !reaction.emoji) return;
+
+    const targetAuthorId = reaction.targetAuthorUuid || reaction.targetAuthor;
+    const targetTimestamp = reaction.targetSentTimestamp;
+    if (!targetAuthorId || !targetTimestamp) {
+      console.log(`[SignalWebSocketReceptor:${this.botPhone}] reaction missing target keys, skipping`);
+      return;
+    }
+
+    const groupInfo = dataMessage.groupInfo;
+    const groupId = groupInfo?.groupId;
+    const sourceUuid = env.sourceUuid;
+    const sourceNumber = env.source || env.sourceNumber;
+
+    const event: SignalReactionEvent = {
+      emoji: reaction.emoji,
+      userId: sourceUuid || sourceNumber || 'unknown',
+      targetAuthorId,
+      targetTimestamp,
+      groupId,
+      botPhone: this.botPhone,
+      added: !reaction.isRemove,
+      timestamp: env.timestamp || Date.now(),
+    };
+
+    try {
+      await this.onReaction(event);
+    } catch (error: any) {
+      console.error(`[SignalWebSocketReceptor:${this.botPhone}] Error handling reaction:`, error.message || error);
     }
   }
 

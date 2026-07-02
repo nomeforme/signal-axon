@@ -210,6 +210,37 @@ export class SignalGrpcClient extends EventEmitter {
   }
 
   /**
+   * Emit a Signal reaction event.
+   *
+   * Signal reactions carry the target message's (author, sentTimestamp) as
+   * their identity. `remove: true` in the incoming Signal envelope maps to
+   * `added: false` on the emit — the connectome server treats it as a
+   * removal, decrementing the reactor set on the target message facet.
+   */
+  async emitSignalReaction(reaction: {
+    emoji: string;
+    userId: string;            // sourceUuid of the reactor
+    targetAuthorId: string;    // uuid of the reacted-to message's author
+    targetTimestamp: number;   // sentTimestamp of the reacted-to message
+    groupId?: string;
+    botPhone: string;
+    added: boolean;
+    timestamp: number;
+  }): Promise<{ success: boolean }> {
+    const streamId = reaction.groupId
+      ? `signal:group:${reaction.groupId}`
+      : `signal:dm:${reaction.botPhone}:${reaction.userId}`;
+
+    const result = await this.client.emitEvent(
+      'signal:reaction',
+      { ...reaction, streamId, streamType: 'signal' },
+      { priority: 'low', waitForFrame: false },
+    );
+
+    return { success: result.success };
+  }
+
+  /**
    * Emit a Signal receipt event
    */
   async emitSignalReceipt(receipt: {
