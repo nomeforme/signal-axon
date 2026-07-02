@@ -41,6 +41,8 @@ export class SignalCommandEffector {
   private maxOutputTokensOverride: number | undefined;
   /** Tracks the last-set historyDefault override (mirrors bot-runtime's ConnectomeBridge state). */
   private historyDefaultOverride: number | undefined;
+  /** Tracks the last-set TTS enable state (axon-local mirror of bot-runtime's effector state). */
+  private ttsEnabledOverride: boolean | undefined;
   /** Default value for `!split auto` — captured at axon startup. */
   private messageSplitThresholdDefault: number;
 
@@ -118,6 +120,9 @@ export class SignalCommandEffector {
       case '!secret':
         return this.handleSecret(args);
 
+      case '!tts':
+        return this.handleTTS(args, emitEvent);
+
       default:
         return null; // Not a recognized command
     }
@@ -163,6 +168,11 @@ export class SignalCommandEffector {
 !autotrigger [on|off] - Autonomous self-triggering loop
   --stream <name> - Shorthand: enter stream + enable autotrigger
   --max-speech-only <N> - Safety net: eject after N idle cycles (default: 5)
+
+!tts [on|off] - Toggle text-to-speech audio attachment (per-bot)
+  Attaches synthesized voice audio to the bot's final message.
+  Only works on bots configured with a TTS provider.
+  Current: ${this.ttsEnabledOverride === undefined ? 'bot-config default' : (this.ttsEnabledOverride ? 'on' : 'off')}
 
 !secret <name> <value> - Store a secret (never reaches VEIL)
   !secret list - List stored secret names
@@ -347,6 +357,43 @@ export class SignalCommandEffector {
     return value === undefined
       ? `History default for ${this.botName} disabled — full history sent to API`
       : `History default for ${this.botName} set to ${value} (each activation trims to last ${value} + trigger)`;
+  }
+
+  /**
+   * !tts — enable/disable audio attachment on this bot's final message.
+   * Per-bot: emits `bot:config` with `ttsEnabled` so the bot-runtime effector
+   * flips its runtime state. If the target bot has no TTS provider configured,
+   * bot-runtime logs the ignore; the axon confirms locally.
+   */
+  private handleTTS(args: string, emitEvent?: EmitEventCallback): string {
+    const arg = args.trim().toLowerCase();
+
+    if (!arg) {
+      if (this.ttsEnabledOverride === undefined) {
+        return `TTS for ${this.botName}: using bot-config default (on iff provider configured, off otherwise)`;
+      }
+      return `TTS for ${this.botName}: ${this.ttsEnabledOverride ? 'on' : 'off'}`;
+    }
+
+    let enabled: boolean;
+    if (arg === 'on' || arg === 'enable' || arg === 'true' || arg === '1') {
+      enabled = true;
+    } else if (arg === 'off' || arg === 'disable' || arg === 'false' || arg === '0') {
+      enabled = false;
+    } else {
+      return 'Usage: !tts on|off';
+    }
+
+    this.ttsEnabledOverride = enabled;
+
+    if (emitEvent) {
+      emitEvent('bot:config', {
+        targetAgent: this.botName,
+        ttsEnabled: enabled,
+      }).catch((e: any) => console.error(`[SignalCommandEffector:${this.botName}] Failed to emit !tts:`, e.message));
+    }
+
+    return `TTS for ${this.botName} ${enabled ? 'enabled' : 'disabled'} (no effect if bot has no TTS provider)`;
   }
 
   private handleMaxTokens(args: string, emitEvent?: EmitEventCallback): string {
