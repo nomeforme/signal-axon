@@ -39,6 +39,8 @@ export class SignalCommandEffector {
   private botName: string;
   /** Tracks the last-set maxOutputTokens override (axon-local, per command effector instance) */
   private maxOutputTokensOverride: number | undefined;
+  /** Tracks the last-set historyDefault override (mirrors bot-runtime's ConnectomeBridge state). */
+  private historyDefaultOverride: number | undefined;
   /** Default value for `!split auto` — captured at axon startup. */
   private messageSplitThresholdDefault: number;
 
@@ -95,6 +97,9 @@ export class SignalCommandEffector {
       case '!mt':
         return this.handleMaxTokens(args, emitEvent);
 
+      case '!h-default':
+        return this.handleHistoryDefault(args, emitEvent);
+
       case '!split':
         return this.handleSplit(args, currentConfig, updateConfig);
 
@@ -135,6 +140,10 @@ export class SignalCommandEffector {
 
 !mt [N] - Max output tokens per response (per-bot, 0=model default)
   Current: ${this.maxOutputTokensOverride ?? 'model default'}
+
+!h-default [N|off] - Persistent history trim (per-bot). Applies !hN to every activation.
+  Current: ${this.historyDefaultOverride === undefined ? 'off (full history)' : `${this.historyDefaultOverride} history + trigger`}
+  Per-message override: prefix a message with !h<N> for one-shot trim.
 
 !split [N|auto|native|off] - Outbound message split threshold (axon-wide)
   N         → split long replies at N chars on paragraph/sentence/word boundaries
@@ -300,6 +309,44 @@ export class SignalCommandEffector {
 
     updateConfig({ maxMemoryFrames: newMaxMemFrames });
     return `Max memory frames set to ${newMaxMemFrames}`;
+  }
+
+  /**
+   * !h-default — persistent history trim default. When set, every activation
+   * on this bot trims the API context to the last N+1 messages (N history +
+   * trigger), same as prefixing every message with !h<N>. `off` disables.
+   * Individual messages can still use !h<N> to override for that turn only.
+   */
+  private handleHistoryDefault(args: string, emitEvent?: EmitEventCallback): string {
+    if (!args) {
+      return this.historyDefaultOverride === undefined
+        ? `History default for ${this.botName}: off (full history sent)`
+        : `History default for ${this.botName}: ${this.historyDefaultOverride} messages of prior history`;
+    }
+
+    const lower = args.toLowerCase();
+    let value: number | undefined;
+    if (lower === 'off' || lower === 'disable' || lower === 'none') {
+      value = undefined;
+    } else {
+      const n = parseInt(args, 10);
+      if (isNaN(n) || n < 0) {
+        return 'Usage: !h-default <N|off> (N >= 0 for last-N-messages of history)';
+      }
+      value = n;
+    }
+    this.historyDefaultOverride = value;
+
+    if (emitEvent) {
+      emitEvent('bot:config', {
+        targetAgent: this.botName,
+        historyDefault: value ?? null,
+      }).catch((e: any) => console.error(`[SignalCommandEffector:${this.botName}] Failed to emit h-default:`, e.message));
+    }
+
+    return value === undefined
+      ? `History default for ${this.botName} disabled — full history sent to API`
+      : `History default for ${this.botName} set to ${value} (each activation trims to last ${value} + trigger)`;
   }
 
   private handleMaxTokens(args: string, emitEvent?: EmitEventCallback): string {
