@@ -207,7 +207,11 @@ Signal supports these text formatting options:
 
     if (this.systemPrompt && this.systemPrompt !== 'Standard') {
       if (identityPrompt) {
-        return `${this.systemPrompt}\n\n${identityPrompt}`;
+        // Identity first, custom persona after — identity/mention/formatting rules
+        // sit at the head where models weight instructions most heavily, before
+        // the persona takes over. Critical for smaller/local models (Qwen etc.)
+        // that otherwise drop trailing meta-instructions behind a strong character prompt.
+        return `${identityPrompt}\n\n${this.systemPrompt}`;
       }
       return this.systemPrompt;
     }
