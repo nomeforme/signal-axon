@@ -60,7 +60,11 @@ export function getOperationalConfig(): {
     maxBotMentionsPerConversation: parseInt(process.env.MAX_BOT_MENTIONS || '1') || 1,
     maxConversationFrames: parseInt(process.env.MAX_CONVERSATION_FRAMES || '100') || 100,
     maxMemoryFrames: 500,
-    maxMessageLength: parseInt(process.env.MAX_MESSAGE_LENGTH || '400') || 400,
+    // Default 0 = native (no aggressive split; Signal's "see more" handles long messages,
+    // capped at Signal's 4096-char hard limit). Set MAX_MESSAGE_LENGTH=N for paragraph/
+    // sentence/word-boundary chunking at N chars. Runtime-tunable via `!split` command.
+    // NB: `|| 0` fallback intentional — allows env value "0" through (parseInt('0')||400=400 would be a bug).
+    maxMessageLength: parseInt(process.env.MAX_MESSAGE_LENGTH || '0') || 0,
     groupPrivacyMode: (mode === 'opt-in' ? 'opt-in' : 'opt-out'),
   };
 }
