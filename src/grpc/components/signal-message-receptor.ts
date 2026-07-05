@@ -228,7 +228,9 @@ export class SignalMessageReceptor {
 
     if (isGroupMessage && shouldEmitToConnectome) {
       if (priorityEmitter) {
-        // Attachment + targeted case: only priority emitter emits
+        // Attachment + targeted case: only priority emitter emits (image
+        // processing is expensive, and every targeted bot activating with the
+        // image would compress/upload it N times).
         if (botName !== priorityEmitter) {
           shouldEmitToConnectome = false;
           // If this bot IS targeted but not priority emitter, skip activation too
@@ -241,8 +243,25 @@ export class SignalMessageReceptor {
         } else {
           console.log(`[SignalMessageReceptor:${botName}] I am priority emitter for attachment message`);
         }
+      } else if (targetedBotNames.length > 0) {
+        // Targeted (non-image) case: every targeted bot emits its own copy.
+        // Server dedupes on the deterministic facet ID
+        // (`msg-signal-<senderId>-<timestamp>`) — first emit creates the frame,
+        // subsequent emits no-op server-side but still receive `waitForFrame`
+        // acknowledgment.
+        //
+        // Why: previously non-emit-winning targeted bots called `activateAgent`
+        // immediately, racing the winner's `emitSignalMessage`. If the
+        // activation reached the server before the message facet landed, the
+        // rendered context omitted the trigger — the bot then saw an activation
+        // with no visible new message. Every targeted bot doing its own emit
+        // turns the race into a per-bot sequential barrier.
+        if (!targetedBotNames.includes(botName)) {
+          shouldEmitToConnectome = false;
+          console.log(`[SignalMessageReceptor:${botName}] Not targeted, ${targetedBotNames.join('/')} will emit`);
+        }
       } else {
-        // Normal case: use deduplication lottery
+        // Untargeted (random-reply / passive) case: fall back to lottery.
         const dedupeKey = `emit-${event.sender}-${event.timestamp}-${event.content?.substring(0, 50)}`;
         if (!messageDeduplicator.shouldEmit(dedupeKey, botPhone, isGroupMessage)) {
           shouldEmitToConnectome = false;
