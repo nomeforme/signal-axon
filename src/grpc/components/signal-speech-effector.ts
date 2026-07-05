@@ -159,6 +159,14 @@ export class SignalSpeechEffector {
       // Split if too long — ensure at least one chunk for attachment-only messages
       const chunks = contentWithMentions ? splitMessage(contentWithMentions, effectiveMax) : (base64Attachments.length > 0 ? [''] : []);
 
+      // We collect the timestamps returned by signal-cli so we can register
+      // `msg-signal-<botUuid>-<ts>` → speech-facet aliases with the server.
+      // That lets a user react 🫥 to the bot's own message and have the
+      // reaction handler locate the speech facet (which lives under
+      // `speech-<eventId>`, not `msg-signal-*`, so the primary lookup would
+      // otherwise miss). One send call → one timestamp → one alias.
+      const sentTimestamps: number[] = [];
+
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
 
@@ -192,12 +200,39 @@ export class SignalSpeechEffector {
           return;
         }
 
-        await axios.post(`${apiUrl}/v2/send`, body, {
+        const resp = await axios.post(`${apiUrl}/v2/send`, body, {
           headers: { 'Content-Type': 'application/json' }
         });
+        // Response shape varies by signal-cli-rest version. Observed:
+        //   v0.85+ direct send    → { timestamp: "<ms-as-string>" }  (yes, STRING)
+        //   older / multi-recip.  → { results: [{ timestamp: ... }] }
+        // Coerce to number defensively regardless of shape.
+        const data: any = resp?.data;
+        const raw = data?.timestamp
+          ?? (Array.isArray(data?.results) ? data.results[0]?.timestamp : undefined)
+          ?? (Array.isArray(data) ? data[0]?.timestamp : undefined);
+        const ts = typeof raw === 'number' ? raw : (typeof raw === 'string' ? Number(raw) : NaN);
+        if (Number.isFinite(ts)) sentTimestamps.push(ts);
       }
 
       console.log(`[SignalSpeechEffector:${botName}] Sent ${chunks.length} chunk(s)`);
+
+      // Register redaction aliases. Only possible when we know this bot's own
+      // UUID (populated at signal-cli discovery time — see grpc-main.ts
+      // `discoverBotUuid`). Fire-and-forget.
+      const botUuid = this.botConfig.uuid;
+      if (facet?.id && botUuid && sentTimestamps.length) {
+        for (const ts of sentTimestamps) {
+          this.grpcClient.emitEvent('agent:speech:delivered', {
+            facetId: facet.id,
+            platform: 'signal',
+            senderUuid: botUuid,
+            timestamp: ts,
+          }, { priority: 'low', waitForFrame: false }).catch((err: any) => {
+            console.warn(`[SignalSpeechEffector:${botName}] Failed to register speech alias ${ts}: ${err.message}`);
+          });
+        }
+      }
     } catch (error: any) {
       console.error(`[SignalSpeechEffector:${botName}] Error sending message:`, error.message);
     }
