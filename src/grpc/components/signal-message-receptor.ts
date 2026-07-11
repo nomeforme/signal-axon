@@ -448,6 +448,7 @@ export class SignalMessageReceptor {
         this.updateConfig,
         (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId }),
         sysPromptFileText,
+        streamId,
       );
       if (response) {
         try {
