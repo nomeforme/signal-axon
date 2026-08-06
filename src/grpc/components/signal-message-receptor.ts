@@ -214,6 +214,82 @@ export class SignalMessageReceptor {
       }
     }
 
+    // ============================================================
+    // STEP 2a: ! commands — handled by command effectors, NEVER stored in
+    // VEIL (parity with Discord). This must run BEFORE emission: previously
+    // the emit-winning bot stored the command text as a message facet (and
+    // logged a spurious activation) before the command check returned early.
+    // Gating: targeted commands (@bot !cmd / quote) are handled only by the
+    // targeted bot; untargeted group commands go through the dedup lottery so
+    // exactly one bot handles them (this also makes bare stream-wide commands
+    // like `!mcf 400` work in groups — they previously required a mention).
+    // ============================================================
+    const strippedForCommand = readableContent.replace(/^(@\S+\s+)+/, '').trim();
+    const isContinuationCommand =
+      /^[!]continue\b/i.test(strippedForCommand) || /^m\s+(continue|go|more)\b/i.test(strippedForCommand);
+    const earlyCommandText = this.parseCommand(readableContent);
+    if (!isSenderBot && (isContinuationCommand || earlyCommandText)) {
+      if (targetedBotNames.length > 0) {
+        if (!targetedBotNames.includes(botName)) {
+          return; // A bot was targeted and it isn't this one — nobody emits commands
+        }
+      } else if (isGroupMessage) {
+        const cmdKey = `cmd-${event.sender}-${event.timestamp}`;
+        if (!messageDeduplicator.shouldEmit(cmdKey, botPhone, isGroupMessage)) {
+          return; // Another bot won the lottery for this untargeted command
+        }
+      }
+
+      if (isContinuationCommand) {
+        console.log(`[SignalMessageReceptor:${botName}] Continuation command detected`);
+        // Activate the agent with continuation flag — skip normal message flow
+        // (Signal doesn't support message deletion, so the trigger stays out of
+        // VEIL by virtue of this early return instead)
+        try {
+          await this.bot.grpcClient.activateAgent(streamId, 'continuation', {
+            messageContent: '',
+            authorName: event.sender,
+            streamType: 'signal',
+            targetBot: botName,
+            continuation: 'true',
+            ...this.mcfMetadata(streamId, botName),
+          });
+          console.log(`[SignalMessageReceptor:${botName}] Continuation activation sent for stream ${streamId}`);
+        } catch (error: any) {
+          console.error(`[SignalMessageReceptor:${botName}] Error sending continuation activation:`, error.message);
+        }
+        return;
+      }
+
+      // For !sysprompt, pre-resolve the first text/* attachment to a UTF-8
+      // string so the effector can install it without needing a gRPC client.
+      let sysPromptFileText: string | undefined;
+      if (earlyCommandText!.toLowerCase().startsWith('!sysprompt') && event.attachments && event.attachments.length > 0) {
+        sysPromptFileText = await this.resolveSysPromptAttachment(event.attachments);
+      }
+
+      const response = this.commandEffector.handleCommand(
+        earlyCommandText!,
+        this.state.runtimeConfig,
+        this.updateConfig,
+        (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId }),
+        sysPromptFileText,
+        streamId,
+        targetedBotNames.includes(botName),
+      );
+      if (response) {
+        try {
+          await this.sendSignalMessage(response, event);
+          console.log(`[SignalMessageReceptor:${botName}] Handled command: ${earlyCommandText!.substring(0, 30)}...`);
+        } catch (error: any) {
+          console.error(`[SignalMessageReceptor:${botName}] Error sending command response:`, error.message);
+        }
+      }
+      // Recognized or not, `!`-prefixed text is command-namespace — never
+      // emitted to VEIL and never activates an agent.
+      return;
+    }
+
     // Determine priority emitter for attachment+targeted case
     let priorityEmitter: string | null = null;
     if (hasImageAttachments && targetedBotNames.length > 0) {
@@ -410,56 +486,8 @@ export class SignalMessageReceptor {
     // Log activation
     console.log(`[SignalMessageReceptor:${botName}] Activating for message from ${event.sender}: ${readableContent.substring(0, 50)}... (${activationReason})`);
 
-    // Handle !continue / m continue — continuation command (resume truncated bot output)
-    const contentStripped = readableContent.replace(/^@\S+\s+/, '').trim();
-    if (/^[!]continue\b/i.test(contentStripped) || /^m\s+(continue|go|more)\b/i.test(contentStripped)) {
-      console.log(`[SignalMessageReceptor:${botName}] Continuation command detected`);
-
-      // Activate the agent with continuation flag — skip normal message flow
-      // (Signal doesn't support message deletion, so the trigger stays in history)
-      try {
-        await this.bot.grpcClient.activateAgent(streamId, 'continuation', {
-          messageContent: '',
-          authorName: event.sender,
-          streamType: 'signal',
-          targetBot: botName,
-          continuation: 'true',
-        });
-        console.log(`[SignalMessageReceptor:${botName}] Continuation activation sent for stream ${streamId}`);
-      } catch (error: any) {
-        console.error(`[SignalMessageReceptor:${botName}] Error sending continuation activation:`, error.message);
-      }
-      return;
-    }
-
-    // Handle ! commands
-    const commandText = this.parseCommand(readableContent);
-    if (commandText) {
-      // For !sysprompt, pre-resolve the first text/* attachment to a UTF-8
-      // string so the effector can install it without needing a gRPC client.
-      let sysPromptFileText: string | undefined;
-      if (commandText.toLowerCase().startsWith('!sysprompt') && event.attachments && event.attachments.length > 0) {
-        sysPromptFileText = await this.resolveSysPromptAttachment(event.attachments);
-      }
-
-      const response = this.commandEffector.handleCommand(
-        commandText,
-        this.state.runtimeConfig,
-        this.updateConfig,
-        (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId }),
-        sysPromptFileText,
-        streamId,
-      );
-      if (response) {
-        try {
-          await this.sendSignalMessage(response, event);
-          console.log(`[SignalMessageReceptor:${botName}] Handled command: ${commandText.substring(0, 30)}...`);
-        } catch (error: any) {
-          console.error(`[SignalMessageReceptor:${botName}] Error sending command response:`, error.message);
-        }
-        return; // Command handled, don't run agent
-      }
-    }
+    // NOTE: !continue and ! commands are handled in STEP 2a (pre-emission)
+    // so they never reach VEIL — see above.
 
     // Mark this message as processed by this bot
     this.markProcessed(messageId);
@@ -514,12 +542,25 @@ export class SignalMessageReceptor {
         messageContent: readableContent,
         authorName: event.sender,
         streamType: 'signal',
-        targetBot: botName
+        targetBot: botName,
+        ...this.mcfMetadata(streamId, botName),
       });
       console.log(`[SignalMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
     } catch (error: any) {
       console.error(`[SignalMessageReceptor:${botName}] Error activating agent:`, error.message);
     }
+  }
+
+  /**
+   * Resolve a `!mcf` override for this bot on this stream and shape it as
+   * activation metadata. Bot-specific entry wins over the stream-wide '*'
+   * entry; no entry → empty object (server default applies).
+   */
+  private mcfMetadata(streamId: string, botName: string): Record<string, string> {
+    const per = this.state.runtimeConfig.mcfStreamOverrides?.[streamId];
+    if (!per) return {};
+    const value = per[botName] ?? per['*'];
+    return value !== undefined ? { maxContextFrames: String(value) } : {};
   }
 
   /**
