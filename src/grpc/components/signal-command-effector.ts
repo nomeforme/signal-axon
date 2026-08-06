@@ -77,6 +77,8 @@ export class SignalCommandEffector {
     sysPromptFileText?: string,
     /** Connectome streamId of the triggering message — required for per-stream commands like !h-default. */
     streamId?: string,
+    /** True when THIS bot was explicitly mentioned/quoted — scopes !mcf to this bot instead of the whole stream. */
+    targeted?: boolean,
   ): string | null {
     // Preserve original case for args — only lowercase the command
     let cleaned = content.trim();
@@ -103,7 +105,7 @@ export class SignalCommandEffector {
         return this.handleBotToBotLimit(args, currentConfig, updateConfig);
 
       case '!mcf':
-        return this.handleMaxConversationFrames(args, currentConfig, updateConfig);
+        return this.handleMaxConversationFrames(args, currentConfig, streamId, targeted);
 
       case '!mmf':
         return this.handleMaxMemoryFrames(args, currentConfig, updateConfig);
@@ -152,8 +154,8 @@ export class SignalCommandEffector {
 !bb [N] - Max bot-to-bot interactions (0=unlimited)
   Current: ${config.maxBotMentionsPerConversation === 0 ? 'unlimited' : config.maxBotMentionsPerConversation}
 
-!mcf [N] - Max conversation frames
-  Current: ${config.maxConversationFrames}
+!mcf [N|reset] - Max context frames (server render budget, default 400)
+  Bare: stream-wide; @mention a bot: just that bot. reset clears.
 
 !mmf [N] - Max memory frames
   Current: ${config.maxMemoryFrames}
@@ -306,22 +308,58 @@ export class SignalCommandEffector {
     }
   }
 
+  /**
+   * Handle !mcf (max context frames) command — per-stream override of the
+   * server-side activation context render budget.
+   *
+   * Scoping: `@bot !mcf N` (mention-targeted) sets the budget for THAT bot on
+   * this stream; bare `!mcf N` sets a stream-wide '*' entry for all bots.
+   * `!mcf reset` clears the corresponding scope. No override → server default
+   * (ACTIVATION_CONTEXT_MAX_FRAMES, 400). Overrides are in-memory only and
+   * reset on axon restart.
+   */
   private handleMaxConversationFrames(
     args: string,
     currentConfig: RuntimeConfig,
-    updateConfig: ConfigUpdateCallback
+    streamId?: string,
+    targeted?: boolean,
   ): string {
+    if (!streamId) {
+      return 'Cannot resolve stream for !mcf';
+    }
+    const overrides = currentConfig.mcfStreamOverrides ?? (currentConfig.mcfStreamOverrides = {});
+    const scopeKey = targeted ? this.botName : '*';
+
     if (!args) {
-      return `Max conversation frames: ${currentConfig.maxConversationFrames}`;
+      const per = overrides[streamId];
+      const botVal = per?.[this.botName];
+      const streamVal = per?.['*'];
+      if (botVal !== undefined) return `Max context frames: ${botVal} (override for ${this.botName} on this stream)`;
+      if (streamVal !== undefined) return `Max context frames: ${streamVal} (stream-wide override)`;
+      return 'Max context frames: server default (400)';
+    }
+
+    if (/^(reset|off|default)$/i.test(args)) {
+      const per = overrides[streamId];
+      if (per && per[scopeKey] !== undefined) {
+        delete per[scopeKey];
+        if (Object.keys(per).length === 0) delete overrides[streamId];
+        return targeted
+          ? `Max context frames reset to default for ${this.botName} on this stream`
+          : 'Stream-wide max context frames reset to default';
+      }
+      return 'No override set for this scope';
     }
 
     const newMaxFrames = parseInt(args);
-    if (isNaN(newMaxFrames) || newMaxFrames < 10) {
-      return 'Invalid value. Use a number >= 10';
+    if (isNaN(newMaxFrames) || newMaxFrames < 10 || newMaxFrames > 2000) {
+      return 'Invalid value. Use a number between 10 and 2000, or "reset"';
     }
 
-    updateConfig({ maxConversationFrames: newMaxFrames });
-    return `Max conversation frames set to ${newMaxFrames}`;
+    (overrides[streamId] ??= {})[scopeKey] = newMaxFrames;
+    return targeted
+      ? `Max context frames set to ${newMaxFrames} for ${this.botName} on this stream`
+      : `Max context frames set to ${newMaxFrames} stream-wide`;
   }
 
   private handleMaxMemoryFrames(

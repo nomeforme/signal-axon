@@ -40,6 +40,13 @@ export interface RuntimeConfig {
    * Tunable at runtime via `!split [N|auto|native|off]`.
    */
   messageSplitThreshold: number;
+  /**
+   * Per-stream `!mcf` overrides for the server-side activation context render:
+   * streamId → (botName or '*' for all bots on the stream) → frame budget.
+   * Sent to the server as activation metadata `maxContextFrames`; absent means
+   * the server's ACTIVATION_CONTEXT_MAX_FRAMES default applies. In-memory only.
+   */
+  mcfStreamOverrides: Record<string, Record<string, number>>;
 }
 
 /**

@@ -104,7 +104,8 @@ async function main(): Promise<void> {
       maxConversationFrames: operationalConfig.maxConversationFrames,
       maxMemoryFrames: operationalConfig.maxMemoryFrames,
       groupPrivacyMode: operationalConfig.groupPrivacyMode,
-      messageSplitThreshold: operationalConfig.maxMessageLength
+      messageSplitThreshold: operationalConfig.maxMessageLength,
+      mcfStreamOverrides: {}
     }
   };
 
