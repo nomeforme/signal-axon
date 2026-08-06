@@ -200,9 +200,25 @@ export class SignalSpeechEffector {
           return;
         }
 
-        const resp = await axios.post(`${apiUrl}/v2/send`, body, {
-          headers: { 'Content-Type': 'application/json' }
-        });
+        // Send with one delayed retry: Signal rate-limits bursty accounts
+        // server-side (observed: bare HTTP 400 after ~12s following a rapid
+        // message run). Without a retry the speech is silently dropped while
+        // VEIL records it — bots "see" a message humans never received.
+        let resp;
+        try {
+          resp = await axios.post(`${apiUrl}/v2/send`, body, {
+            headers: { 'Content-Type': 'application/json' }
+          });
+        } catch (sendErr: any) {
+          const status = sendErr?.response?.status;
+          const detail = JSON.stringify(sendErr?.response?.data ?? sendErr?.message ?? '').slice(0, 300);
+          console.warn(`[SignalSpeechEffector:${botName}] Send failed (HTTP ${status}): ${detail} — retrying in 10s`);
+          await new Promise(r => setTimeout(r, 10_000));
+          resp = await axios.post(`${apiUrl}/v2/send`, body, {
+            headers: { 'Content-Type': 'application/json' }
+          });
+          console.log(`[SignalSpeechEffector:${botName}] Retry succeeded`);
+        }
         // Response shape varies by signal-cli-rest version. Observed:
         //   v0.85+ direct send    → { timestamp: "<ms-as-string>" }  (yes, STRING)
         //   older / multi-recip.  → { results: [{ timestamp: ... }] }
