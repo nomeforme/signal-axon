@@ -20,6 +20,14 @@ export interface BotConfig {
   phone?: string;
   uuid?: string;
   agentName?: string;  // from platform binding — matches bot-runtime's BOT_NAME
+  /**
+   * Per-bot default frame budget for the server-side activation context
+   * render, advertised by bot-runtime via the platform binding
+   * (`defaultMaxContextFrames` credential). Used when no per-stream `!mcf`
+   * override exists — lets small-context local models cap their activation
+   * context persistently instead of relying on in-memory `!mcf` commands.
+   */
+  defaultMaxContextFrames?: number;
 }
 
 /**

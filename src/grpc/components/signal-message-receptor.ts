@@ -558,8 +558,10 @@ export class SignalMessageReceptor {
    */
   private mcfMetadata(streamId: string, botName: string): Record<string, string> {
     const per = this.state.runtimeConfig.mcfStreamOverrides?.[streamId];
-    if (!per) return {};
-    const value = per[botName] ?? per['*'];
+    // Precedence: per-stream bot-specific !mcf → per-stream '*' !mcf →
+    // per-bot default advertised by bot-runtime (config.json
+    // max_context_frames) → server env default (no metadata sent).
+    const value = per?.[botName] ?? per?.['*'] ?? this.bot.config.defaultMaxContextFrames;
     return value !== undefined ? { maxContextFrames: String(value) } : {};
   }
 

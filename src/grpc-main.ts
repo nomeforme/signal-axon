@@ -144,10 +144,20 @@ async function main(): Promise<void> {
   // Called both at startup (env phones) and dynamically (binding ads)
   // ========================================================================
   async function addSignalBot(
-    name: string, phone: string, uuid: string | undefined, source: string, agentName?: string
+    name: string, phone: string, uuid: string | undefined, source: string, agentName?: string,
+    defaultMaxContextFrames?: number
   ): Promise<boolean> {
     if (state.bots.has(phone)) {
-      console.log(`  ${name}: Already managed, skipping (${source})`);
+      // Refresh binding-carried settings on re-advertisement so a bot-runtime
+      // config change (e.g. defaultMaxContextFrames) lands without an axon restart.
+      const existing = state.bots.get(phone)!;
+      if (defaultMaxContextFrames !== undefined &&
+          existing.config.defaultMaxContextFrames !== defaultMaxContextFrames) {
+        console.log(`  ${name}: updating defaultMaxContextFrames → ${defaultMaxContextFrames} (${source})`);
+        existing.config.defaultMaxContextFrames = defaultMaxContextFrames;
+      } else {
+        console.log(`  ${name}: Already managed, skipping (${source})`);
+      }
       return true;
     }
 
@@ -173,7 +183,7 @@ async function main(): Promise<void> {
       nameToUuidCache.set(name.toLowerCase(), uuid);
     }
 
-    const botConfig: BotConfig = { name, phone, uuid, agentName };
+    const botConfig: BotConfig = { name, phone, uuid, agentName, defaultMaxContextFrames };
     const bot = createBotInstance(botConfig, host, port);
     state.bots.set(phone, bot);
 
@@ -357,13 +367,25 @@ async function main(): Promise<void> {
           continue;
         }
         console.log(`[AxonBinding] Adding bot ${binding.agentName}...`);
-        await addSignalBot(
+        // Optional per-bot activation-context frame budget from bot-runtime
+        const mcfRaw = binding.credentials.defaultMaxContextFrames;
+        const mcfParsed = mcfRaw ? parseInt(mcfRaw, 10) : NaN;
+        const ok = await addSignalBot(
           binding.agentName,
           phone,
           binding.credentials.uuid,
           `binding:${binding.agentName}`,
-          binding.agentName  // pass as agentName
+          binding.agentName,  // pass as agentName
+          Number.isFinite(mcfParsed) && mcfParsed > 0 ? mcfParsed : undefined
         );
+        if (!ok) {
+          // addSignalBot already unwound its own state. Drop the binding too, so
+          // the bot-runtime's 30s keepalive re-advertises as new and we retry.
+          // Without this the binding stays recorded, AdvertiseBinding stops
+          // emitting, and the bot is simply absent until the axon restarts.
+          bindingServer!.forgetBinding('signal', binding.agentName);
+          console.error(`[AxonBinding] ${binding.agentName} add failed — will retry via keepalive (~30s)`);
+        }
       }
       processingBindings = false;
     }

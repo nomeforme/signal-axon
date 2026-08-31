@@ -128,7 +128,27 @@ export class SignalSpeechEffector {
       //    through the FacetDelta broadcast — only the sha ref did.
       //  - data as Uint8Array: legacy inline path; convert to base64.
       //  - data as string: already base64.
-      const base64Attachments: string[] = [];
+      // Attachments are partitioned by Signal RENDER CLASS. Signal clients
+      // render a message's attachments natively only when they're all of one
+      // class; mixing classes in a single message degrades everything to
+      // generic file cards (observed live: a painting PNG + its TTS mp3
+      // showed as a ".png file" card instead of an inline image).
+      //
+      //   visual (image/*, video/*) — batch freely: renders as an inline
+      //     picture / media gallery, and captions (message text) attach
+      //     natively, so this class rides with the text message.
+      //   audio (audio/*) — renders as a voice-note/audio bubble only when
+      //     it's effectively the sole attachment, so each audio file gets
+      //     its own send when other classes are present.
+      //   other (documents, archives, anything else) — renders as file
+      //     cards regardless, so batching them is lossless.
+      type RenderClass = 'visual' | 'audio' | 'other';
+      const classify = (ct: string): RenderClass =>
+        ct.startsWith('image/') || ct.startsWith('video/') ? 'visual'
+        : ct.startsWith('audio/') ? 'audio'
+        : 'other';
+
+      const byClass: Record<RenderClass, string[]> = { visual: [], audio: [], other: [] };
       if (facet.attachments?.length) {
         for (const att of facet.attachments) {
           let b64: string | null = null;
@@ -147,7 +167,29 @@ export class SignalSpeechEffector {
             b64 = att.data;
           }
 
-          if (b64) base64Attachments.push(b64);
+          if (!b64) continue;
+          byClass[classify((att.contentType || att.mimeType || '').toLowerCase())].push(b64);
+        }
+      }
+
+      // Single class present → keep the classic one-send behavior (all
+      // attachments ride with the first text chunk; that IS the native
+      // rendering for a homogeneous set, and it keeps text+TTS replies as
+      // one message). Multiple classes → the text message carries the class
+      // that benefits most from the caption slot (visual > other > audio),
+      // and the remaining classes follow as their own sends: `other` as one
+      // batched card message, each `audio` as its own voice-note send.
+      const presentClasses = (['visual', 'other', 'audio'] as RenderClass[]).filter(c => byClass[c].length > 0);
+      const primaryClass: RenderClass | undefined = presentClasses[0];
+      const primaryAttachments = primaryClass ? byClass[primaryClass] : [];
+      const followUpSends: string[][] = [];
+      if (presentClasses.length > 1) {
+        for (const cls of presentClasses.slice(1)) {
+          if (cls === 'audio') {
+            for (const a of byClass.audio) followUpSends.push([a]);
+          } else {
+            followUpSends.push(byClass[cls]);
+          }
         }
       }
 
@@ -157,7 +199,18 @@ export class SignalSpeechEffector {
       const effectiveMax = threshold > 0 ? threshold : SIGNAL_HARD_MESSAGE_LIMIT;
 
       // Split if too long — ensure at least one chunk for attachment-only messages
-      const chunks = contentWithMentions ? splitMessage(contentWithMentions, effectiveMax) : (base64Attachments.length > 0 ? [''] : []);
+      const chunks = contentWithMentions ? splitMessage(contentWithMentions, effectiveMax) : (primaryAttachments.length > 0 ? [''] : []);
+
+      // Build the send plan: text chunks (first carries mentions + the
+      // primary attachment class), then one send per remaining render group.
+      const sendPlans: Array<{ text: string; attachments?: string[]; withMentions: boolean }> = chunks.map((c, i) => ({
+        text: c,
+        attachments: i === 0 && primaryAttachments.length > 0 ? primaryAttachments : undefined,
+        withMentions: i === 0,
+      }));
+      for (const group of followUpSends) {
+        sendPlans.push({ text: '', attachments: group, withMentions: false });
+      }
 
       // We collect the timestamps returned by signal-cli so we can register
       // `msg-signal-<botUuid>-<ts>` → speech-facet aliases with the server.
@@ -167,23 +220,22 @@ export class SignalSpeechEffector {
       // otherwise miss). One send call → one timestamp → one alias.
       const sentTimestamps: number[] = [];
 
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
+      for (let i = 0; i < sendPlans.length; i++) {
+        const plan = sendPlans[i];
 
         const body: any = {
           number: botPhone,
-          message: chunk,
+          message: plan.text,
           text_mode: 'styled'  // Enable Signal text formatting
         };
 
         // Only include mentions in the first chunk
-        if (i === 0 && mentions.length > 0) {
+        if (plan.withMentions && mentions.length > 0) {
           body.mentions = mentions;
         }
 
-        // Only include attachments in the first chunk
-        if (i === 0 && base64Attachments.length > 0) {
-          body.base64_attachments = base64Attachments;
+        if (plan.attachments && plan.attachments.length > 0) {
+          body.base64_attachments = plan.attachments;
         }
 
         // Determine recipient
@@ -231,7 +283,7 @@ export class SignalSpeechEffector {
         if (Number.isFinite(ts)) sentTimestamps.push(ts);
       }
 
-      console.log(`[SignalSpeechEffector:${botName}] Sent ${chunks.length} chunk(s)`);
+      console.log(`[SignalSpeechEffector:${botName}] Sent ${sendPlans.length} send(s) (${chunks.length} text chunk(s)${followUpSends.length > 0 ? ` + ${followUpSends.length} attachment follow-up(s)` : ''})`);
 
       // Register redaction aliases. Only possible when we know this bot's own
       // UUID (populated at signal-cli discovery time — see grpc-main.ts
